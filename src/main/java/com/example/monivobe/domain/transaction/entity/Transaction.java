@@ -41,6 +41,8 @@ public class Transaction {
 
     private Boolean confidence;
 
+    private Boolean isAbnormal;
+
     public Transaction(
             Member member,
             String merchant,
@@ -51,8 +53,12 @@ public class Transaction {
         this.merchant = merchant;
         this.amount = amount;
         this.date = date;
+
         this.classificationType = ClassificationType.UNCLASSIFIED;
+        this.isAbnormal = false;
+        this.confidence = false;
     }
+
     public void setCategory(Category category) {
         this.category = category;
     }
