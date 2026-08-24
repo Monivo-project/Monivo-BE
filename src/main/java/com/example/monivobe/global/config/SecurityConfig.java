@@ -84,7 +84,8 @@ public class SecurityConfig {
                 new CorsConfiguration();
 
         configuration.setAllowedOrigins(
-                List.of("http://localhost:5173")
+                List.of("http://localhost:5173",
+                        "https://anna-lee.xyz")
         );
 
         configuration.setAllowedMethods(
@@ -102,6 +103,7 @@ public class SecurityConfig {
                 List.of("*")
         );
 
+        // 쿠키 인증을 위해 반드시 true
         configuration.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source =

@@ -54,6 +54,6 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
         );
 
         // 로그인 성공 후 프론트엔드로 이동
-        response.sendRedirect("http://localhost:5173/");
+        response.sendRedirect("https://anna-lee.xyz");
     }
 }
