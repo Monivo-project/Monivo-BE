@@ -42,8 +42,9 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
         ResponseCookie accessTokenCookie = ResponseCookie
                 .from("accessToken", accessToken)
                 .httpOnly(true)
-                .secure(false)       // 로컬 개발: false
+                .secure(true)
                 .sameSite("Lax")
+                .domain("anna-lee.xyz")
                 .path("/")
                 .maxAge(60 * 60 * 24)
                 .build();
