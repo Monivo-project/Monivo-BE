@@ -1,10 +1,9 @@
 spring:
-  application:
-    name: Monivo-BE
+  config:
+    import: optional:file:.env[.properties]
 
-  ai:
-    openai:
-      api-key: ${OPENAI_API_KEY}
+  application:
+    name: "monivo"
 
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -21,6 +20,10 @@ spring:
     properties:
       hibernate:
         format_sql: true
+
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY}
 
   security:
     oauth2:
