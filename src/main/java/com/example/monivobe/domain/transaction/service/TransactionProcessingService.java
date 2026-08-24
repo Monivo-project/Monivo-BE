@@ -7,7 +7,6 @@ import com.example.monivobe.domain.transaction.entity.CategoryKeyword;
 import com.example.monivobe.domain.transaction.entity.Transaction;
 import com.example.monivobe.domain.transaction.enums.ClassificationType;
 import com.example.monivobe.domain.transaction.repository.CategoryKeywordRepository;
-import com.example.monivobe.domain.transaction.repository.CategoryRepository;
 import com.example.monivobe.domain.transaction.repository.TransactionRepository;
 import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.*;
@@ -28,10 +27,15 @@ public class TransactionProcessingService {
     private final TransactionRepository transactionRepository;
     private final MemberRepository memberRepository;
     private final CategoryKeywordRepository categoryKeywordRepository;
-    private final CategoryRepository categoryRepository;
     private final TransactionAiService transactionAiService;
     private final FileStorageService fileStorageService;
 
+    /**
+     * S3에 저장된 거래내역 Excel 파일 처리
+     *
+     * 실제 호출은 TransactionUploadedEventListener에서
+     * 비동기로 수행된다.
+     */
     @Transactional
     public void process(
             Long memberId,
@@ -54,14 +58,19 @@ public class TransactionProcessingService {
 
             // 3. Excel 파싱
             List<Transaction> transactions =
-                    parseExcel(inputStream, member);
+                    parseExcel(
+                            inputStream,
+                            member
+                    );
 
             if (transactions.isEmpty()) {
                 return;
             }
 
             // 4. 먼저 DB 저장
-            transactionRepository.saveAll(transactions);
+            transactionRepository.saveAll(
+                    transactions
+            );
 
             // 5. 미분류 거래만 추출
             List<Transaction> unclassifiedTransactions =
@@ -72,10 +81,14 @@ public class TransactionProcessingService {
                             )
                             .toList();
 
-            // 6. 미분류 거래만 LLM 분류
-            transactionAiService.classifyUnclassifiedTransactions(
-                    unclassifiedTransactions
-            );
+            // 6. 미분류 거래만 AI 분류
+            if (!unclassifiedTransactions.isEmpty()) {
+
+                transactionAiService
+                        .classifyUnclassifiedTransactions(
+                                unclassifiedTransactions
+                        );
+            }
 
         } catch (IOException e) {
 
@@ -104,7 +117,6 @@ public class TransactionProcessingService {
                     workbook.getSheetAt(0);
 
             /*
-             * 기존 코드와 동일하게
              * 6번째 행(index 5)부터 데이터 시작
              */
             for (int i = 5;
@@ -118,7 +130,6 @@ public class TransactionProcessingService {
                 }
 
                 /*
-                 * 기존 코드와 동일하게
                  * 5번째 컬럼(index 4)을 금액으로 사용
                  */
                 Cell amountCell =
@@ -175,7 +186,9 @@ public class TransactionProcessingService {
 
                 if (category != null) {
 
-                    transaction.setCategory(category);
+                    transaction.setCategory(
+                            category
+                    );
 
                     transaction.setClassificationType(
                             ClassificationType.KEYWORD
@@ -201,18 +214,17 @@ public class TransactionProcessingService {
     private LocalDateTime getDate(Cell cell) {
 
         if (cell == null
-                || cell.getCellType() == CellType.BLANK) {
+                || cell.getCellType()
+                == CellType.BLANK) {
 
             return null;
         }
 
         /*
-         * Excel 셀이 문자열인 경우
-         *
-         * 예:
-         * 2026-08-24 15:30:00
+         * 문자열 날짜
          */
-        if (cell.getCellType() == CellType.STRING) {
+        if (cell.getCellType()
+                == CellType.STRING) {
 
             String value =
                     cell.getStringCellValue()
@@ -231,9 +243,10 @@ public class TransactionProcessingService {
         }
 
         /*
-         * Excel 날짜 형식인 경우
+         * Excel 날짜
          */
-        if (cell.getCellType() == CellType.NUMERIC
+        if (cell.getCellType()
+                == CellType.NUMERIC
                 && DateUtil.isCellDateFormatted(cell)) {
 
             return cell.getLocalDateTimeCellValue();
@@ -294,8 +307,7 @@ public class TransactionProcessingService {
     }
 
     /**
-     * 거래처명을 기반으로
-     * CategoryKeyword를 검색
+     * 거래처명을 기반으로 Category 검색
      */
     private Category findCategory(
             String merchant

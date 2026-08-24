@@ -1,0 +1,320 @@
+package com.example.monivobe.domain.consumption.service;
+
+import com.example.monivobe.domain.consumption.converter.ConsumptionConverter;
+import com.example.monivobe.domain.consumption.dto.ConsumptionResDTO;
+import com.example.monivobe.domain.member.entity.Member;
+import com.example.monivobe.domain.transaction.entity.Category;
+import com.example.monivobe.domain.transaction.entity.Transaction;
+import com.example.monivobe.domain.transaction.enums.ClassificationType;
+import com.example.monivobe.domain.transaction.repository.CategoryRepository;
+import com.example.monivobe.domain.transaction.repository.TransactionRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import java.time.LocalDateTime;
+import java.time.YearMonth;
+import java.util.List;
+
+@Service
+@RequiredArgsConstructor
+@Transactional(readOnly = true)
+public class ConsumptionService {
+
+    private final TransactionRepository transactionRepository;
+    private final CategoryRepository categoryRepository;
+
+
+    /**
+     * 월별 소비 내역 조회
+     */
+    public ConsumptionResDTO.GetConsumption getConsumption(
+            Integer year,
+            Integer month,
+            Member member
+    ) {
+
+        YearMonth yearMonth = YearMonth.of(year, month);
+
+        LocalDateTime startDate =
+                yearMonth.atDay(1).atStartOfDay();
+
+        LocalDateTime endDate =
+                yearMonth.plusMonths(1).atDay(1).atStartOfDay();
+
+
+        // 해당 월 거래 조회
+        List<Transaction> transactions =
+                transactionRepository
+                        .findByMemberAndDateGreaterThanEqualAndDateLessThanOrderByDateDesc(
+                                member,
+                                startDate,
+                                endDate
+                        );
+
+
+        // 총 지출
+        int totalAmount = transactions.stream()
+                .map(Transaction::getAmount)
+                .filter(amount -> amount != null)
+                .mapToInt(Integer::intValue)
+                .sum();
+
+
+        // 거래 수
+        int transactionCount = transactions.size();
+
+
+        // 이상 지출 수
+        long abnormalCount =
+                transactionRepository
+                        .countByMemberAndDateGreaterThanEqualAndDateLessThanAndIsAbnormalTrue(
+                                member,
+                                startDate,
+                                endDate
+                        );
+
+
+        // 미분류 수
+        long unclassifiedCount =
+                transactionRepository
+                        .countByMemberAndDateGreaterThanEqualAndDateLessThanAndClassificationType(
+                                member,
+                                startDate,
+                                endDate,
+                                ClassificationType.UNCLASSIFIED
+                        );
+
+
+        List<ConsumptionResDTO.TransactionInfo> transactionList =
+                transactions.stream()
+                        .map(ConsumptionConverter::toTransactionInfo)
+                        .toList();
+
+
+        return ConsumptionResDTO.GetConsumption.builder()
+                .year(year)
+                .month(month)
+                .totalAmount(totalAmount)
+                .transactionCount(transactionCount)
+                .abnormalCount((int) abnormalCount)
+                .uncategorizedCount((int) unclassifiedCount)
+                .transactions(transactionList)
+                .build();
+    }
+
+
+    /**
+     * 월별 카테고리 지출 조회
+     */
+    public ConsumptionResDTO.GetConsumptionCategory getConsumptionCategory(
+            Integer year,
+            Integer month,
+            Member member
+    ) {
+
+        YearMonth yearMonth = YearMonth.of(year, month);
+
+        LocalDateTime startDate =
+                yearMonth.atDay(1).atStartOfDay();
+
+        LocalDateTime endDate =
+                yearMonth.plusMonths(1).atDay(1).atStartOfDay();
+
+
+        List<Object[]> results =
+                transactionRepository.findCategorySummary(
+                        member,
+                        startDate,
+                        endDate
+                );
+
+
+        // 전체 지출
+        int totalAmount = results.stream()
+                .mapToInt(result ->
+                        ((Number) result[2]).intValue()
+                )
+                .sum();
+
+
+        List<ConsumptionResDTO.CategoryAmount> categories =
+                results.stream()
+                        .map(result -> {
+
+                            Long categoryId =
+                                    ((Number) result[0]).longValue();
+
+                            String categoryName =
+                                    (String) result[1];
+
+                            int amount =
+                                    ((Number) result[2]).intValue();
+
+                            double percentage =
+                                    totalAmount == 0
+                                            ? 0
+                                            : ((double) amount / totalAmount) * 100;
+
+                            return ConsumptionResDTO.CategoryAmount.builder()
+                                    .categoryId(categoryId)
+                                    .categoryName(categoryName)
+                                    .amount(amount)
+                                    .percentage(percentage)
+                                    .build();
+                        })
+                        .toList();
+
+
+        return ConsumptionResDTO.GetConsumptionCategory.builder()
+                .year(year)
+                .month(month)
+                .categories(categories)
+                .build();
+    }
+
+
+    /**
+     * 거래 검색
+     */
+    public ConsumptionResDTO.GetConsumption searchConsumption(
+            Integer year,
+            Integer month,
+            String merchant,
+            Long categoryId,
+            Member member
+    ) {
+
+        YearMonth yearMonth = YearMonth.of(year, month);
+
+        LocalDateTime startDate =
+                yearMonth.atDay(1).atStartOfDay();
+
+        LocalDateTime endDate =
+                yearMonth.plusMonths(1).atDay(1).atStartOfDay();
+
+
+        List<Transaction> transactions =
+                transactionRepository.searchTransactions(
+                        member,
+                        startDate,
+                        endDate,
+                        merchant,
+                        categoryId
+                );
+
+
+        int totalAmount = transactions.stream()
+                .map(Transaction::getAmount)
+                .filter(amount -> amount != null)
+                .mapToInt(Integer::intValue)
+                .sum();
+
+
+        List<ConsumptionResDTO.TransactionInfo> transactionList =
+                transactions.stream()
+                        .map(ConsumptionConverter::toTransactionInfo)
+                        .toList();
+
+
+        return ConsumptionResDTO.GetConsumption.builder()
+                .year(year)
+                .month(month)
+                .totalAmount(totalAmount)
+                .transactionCount(transactions.size())
+                .transactions(transactionList)
+                .build();
+    }
+
+
+    /**
+     * 거래 상세 조회
+     */
+    public ConsumptionResDTO.GetConsumptionDetail getConsumptionDetail(
+            Long transactionId,
+            Member member
+    ) {
+
+        Transaction transaction =
+                transactionRepository
+                        .findByIdAndMember(transactionId, member)
+                        .orElseThrow(() ->
+                                new IllegalArgumentException(
+                                        "해당 거래 내역을 찾을 수 없습니다."
+                                )
+                        );
+
+
+        return ConsumptionResDTO.GetConsumptionDetail.builder()
+                .transactionId(transaction.getId())
+                .merchant(transaction.getMerchant())
+                .amount(transaction.getAmount())
+                .date(transaction.getDate())
+                .categoryId(
+                        transaction.getCategory() != null
+                                ? transaction.getCategory().getId()
+                                : null
+                )
+                .categoryName(
+                        transaction.getCategory() != null
+                                ? transaction.getCategory().getName()
+                                : null
+                )
+                .classificationType(
+                        transaction.getClassificationType()
+                )
+                .isAbnormal(transaction.getIsAbnormal())
+                .confidence(transaction.getConfidence())
+                .build();
+    }
+
+
+    /**
+     * 거래 삭제
+     */
+    @Transactional
+    public void deleteConsumptionDetail(
+            Long transactionId,
+            Member member
+    ) {
+
+        Transaction transaction =
+                transactionRepository
+                        .findByIdAndMember(transactionId, member)
+                        .orElseThrow(() ->
+                                new IllegalArgumentException(
+                                        "해당 거래 내역을 찾을 수 없습니다."
+                                )
+                        );
+
+        transactionRepository.delete(transaction);
+    }
+
+
+    /**
+     * 카테고리 목록 조회
+     */
+    public ConsumptionResDTO.GetCategory getCategories(
+            Member member
+    ) {
+
+        List<Category> categories =
+                categoryRepository.findAllByOrderByIdAsc();
+
+
+        List<ConsumptionResDTO.CategoryInfo> categoryList =
+                categories.stream()
+                        .map(category ->
+                                ConsumptionResDTO.CategoryInfo.builder()
+                                        .categoryId(category.getId())
+                                        .name(category.getName())
+                                        .description(category.getDescription())
+                                        .build()
+                        )
+                        .toList();
+
+
+        return ConsumptionResDTO.GetCategory.builder()
+                .categories(categoryList)
+                .build();
+    }
+}
