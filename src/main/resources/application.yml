@@ -1,4 +1,6 @@
 spring:
+  forward-headers-strategy: framework
+
   config:
     import: optional:file:.env[.properties]
 
