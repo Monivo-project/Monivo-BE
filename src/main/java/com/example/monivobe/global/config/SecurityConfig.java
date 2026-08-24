@@ -39,7 +39,8 @@ public class SecurityConfig {
             "/swagger-resources/**",
             "/v3/api-docs/**",
             "/oauth2/**",
-            "/login",
+            "/login/oauth2/**",
+            "/login"
     };
 
     @Bean
@@ -52,8 +53,9 @@ public class SecurityConfig {
                         .anyRequest().authenticated()
                 )
                 .oauth2Login(oauth -> oauth
-                        .loginPage("/oauth2/authorization/kakao")
-                        .userInfoEndpoint(userInfo -> userInfo.userService(customOAuthService))
+                        .userInfoEndpoint(userInfo -> userInfo
+                                .userService(customOAuthService)
+                        )
                         .successHandler(oAuthSuccessHandler())
                         .failureHandler((request, response, exception) -> {
                             exception.printStackTrace();
