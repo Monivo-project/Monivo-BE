@@ -1,6 +1,7 @@
 package com.example.monivobe.domain.member.controller;
 
 import com.example.monivobe.domain.member.dto.MemberReqDTO;
+import com.example.monivobe.domain.member.dto.MemberResDTO;
 import com.example.monivobe.domain.member.exception.code.MemberSuccessCode;
 import com.example.monivobe.domain.member.service.MemberService;
 import com.example.monivobe.global.apiPayload.ApiResponse;
@@ -13,6 +14,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -51,5 +53,13 @@ public class MemberController {
     ){
         BaseSuccessCode code = MemberSuccessCode.MEMBER_GET_SUCCESS;
         return ApiResponse.onSuccess(code, memberService.getName(authMember.getMember()));
+    }
+
+    @GetMapping("/me")
+    public ApiResponse<MemberResDTO.MemberResponse> getMyInfo(
+            @AuthenticationPrincipal UserDetails userDetails
+    ) {
+        BaseSuccessCode code = MemberSuccessCode.MEMBER_GET_SUCCESS;
+        return ApiResponse.onSuccess(code, memberService.getMyInfo(userDetails));
     }
 }
