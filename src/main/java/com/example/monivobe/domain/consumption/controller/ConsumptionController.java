@@ -23,10 +23,12 @@ public class ConsumptionController {
     public ApiResponse<ConsumptionResDTO.GetConsumption> getConsumption(
             @RequestParam Integer year,
             @RequestParam Integer month,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
             @AuthenticationPrincipal AuthMember authMember
     ) {
         BaseSuccessCode code = ConsumptionSuccessCode.CONSUMPTION_GET_SUCCESS;
-        return ApiResponse.onSuccess(code, consumptionService.getConsumption(year, month, authMember.getMember()));
+        return ApiResponse.onSuccess(code, consumptionService.getConsumption(year, month, page, size, authMember.getMember()));
     }
 
     // 월별 카테고리 지출 조회

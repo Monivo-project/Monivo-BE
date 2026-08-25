@@ -2,6 +2,7 @@ package com.example.monivobe.domain.transaction.entity;
 
 import com.example.monivobe.domain.member.entity.Member;
 import com.example.monivobe.domain.transaction.enums.ClassificationType;
+import com.example.monivobe.domain.transaction.enums.TransactionType;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
@@ -15,6 +16,7 @@ import java.time.LocalDateTime;
 @Setter
 @NoArgsConstructor
 public class Transaction {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -43,18 +45,26 @@ public class Transaction {
 
     private Boolean isAbnormal;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private TransactionType transactionType;
+
     public Transaction(
             Member member,
             String merchant,
             Integer amount,
-            LocalDateTime date
+            LocalDateTime date,
+            TransactionType transactionType
     ) {
         this.member = member;
         this.merchant = merchant;
         this.amount = amount;
         this.date = date;
+        this.transactionType = transactionType;
 
-        this.classificationType = ClassificationType.UNCLASSIFIED;
+        this.classificationType =
+                ClassificationType.UNCLASSIFIED;
+
         this.isAbnormal = false;
         this.confidence = false;
     }

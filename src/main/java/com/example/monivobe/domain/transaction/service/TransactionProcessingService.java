@@ -6,6 +6,7 @@ import com.example.monivobe.domain.transaction.entity.Category;
 import com.example.monivobe.domain.transaction.entity.CategoryKeyword;
 import com.example.monivobe.domain.transaction.entity.Transaction;
 import com.example.monivobe.domain.transaction.enums.ClassificationType;
+import com.example.monivobe.domain.transaction.enums.TransactionType;
 import com.example.monivobe.domain.transaction.repository.CategoryKeywordRepository;
 import com.example.monivobe.domain.transaction.repository.TransactionRepository;
 import lombok.RequiredArgsConstructor;
@@ -56,23 +57,28 @@ public class TransactionProcessingService {
                         fileStorageService.download(fileKey)
         ) {
 
-            // 3. Excel 파싱
+            // 3. 카테고리 키워드는 한 번만 조회
+            List<CategoryKeyword> keywords =
+                    categoryKeywordRepository.findAll();
+
+            // 4. Excel 파싱
             List<Transaction> transactions =
                     parseExcel(
                             inputStream,
-                            member
+                            member,
+                            keywords
                     );
 
             if (transactions.isEmpty()) {
                 return;
             }
 
-            // 4. 먼저 DB 저장
+            // 5. 먼저 DB 저장
             transactionRepository.saveAll(
                     transactions
             );
 
-            // 5. 미분류 거래만 추출
+            // 6. 미확인 거래만 추출
             List<Transaction> unclassifiedTransactions =
                     transactions.stream()
                             .filter(transaction ->
@@ -81,7 +87,7 @@ public class TransactionProcessingService {
                             )
                             .toList();
 
-            // 6. 미분류 거래만 AI 분류
+            // 7. 미확인 거래만 AI 분류
             if (!unclassifiedTransactions.isEmpty()) {
 
                 transactionAiService
@@ -104,7 +110,8 @@ public class TransactionProcessingService {
      */
     private List<Transaction> parseExcel(
             InputStream inputStream,
-            Member member
+            Member member,
+            List<CategoryKeyword> keywords
     ) throws IOException {
 
         List<Transaction> transactions =
@@ -156,6 +163,29 @@ public class TransactionProcessingService {
                 }
 
                 /*
+                 * 입금 / 출금 구분
+                 *
+                 * Excel의 2번째 컬럼(index 1)이
+                 * "입금"이면 INCOME
+                 * 그 외에는 EXPENSE
+                 */
+                String transactionTypeValue =
+                        getString(row.getCell(1));
+
+                TransactionType transactionType;
+
+                if ("입금".equals(transactionTypeValue)) {
+
+                    transactionType =
+                            TransactionType.INCOME;
+
+                } else {
+
+                    transactionType =
+                            TransactionType.EXPENSE;
+                }
+
+                /*
                  * 거래처
                  */
                 String merchant =
@@ -175,17 +205,24 @@ public class TransactionProcessingService {
                                 member,
                                 merchant,
                                 amount,
-                                date
+                                date,
+                                transactionType
                         );
 
                 /*
                  * 키워드 기반 카테고리 분류
                  */
                 Category category =
-                        findCategory(merchant);
+                        findCategory(
+                                merchant,
+                                keywords
+                        );
 
                 if (category != null) {
 
+                    /*
+                     * 키워드와 일치하는 카테고리가 있는 경우
+                     */
                     transaction.setCategory(
                             category
                     );
@@ -196,6 +233,12 @@ public class TransactionProcessingService {
 
                 } else {
 
+                    /*
+                     * 카테고리를 찾지 못한 경우
+                     *
+                     * 이후 TransactionAiService에서
+                     * LLM 분류 대상이 됨
+                     */
                     transaction.setClassificationType(
                             ClassificationType.UNCONFIRMED
                     );
@@ -214,17 +257,16 @@ public class TransactionProcessingService {
     private LocalDateTime getDate(Cell cell) {
 
         if (cell == null
-                || cell.getCellType()
-                == CellType.BLANK) {
+                || cell.getCellType() == CellType.BLANK) {
 
             return null;
         }
 
         /*
          * 문자열 날짜
+         * 예: 2026.08.25 14:36:41
          */
-        if (cell.getCellType()
-                == CellType.STRING) {
+        if (cell.getCellType() == CellType.STRING) {
 
             String value =
                     cell.getStringCellValue()
@@ -237,23 +279,24 @@ public class TransactionProcessingService {
             return LocalDateTime.parse(
                     value,
                     DateTimeFormatter.ofPattern(
-                            "yyyy-MM-dd HH:mm:ss"
+                            "yyyy.MM.dd HH:mm:ss"
                     )
             );
         }
 
         /*
-         * Excel 날짜
+         * Excel 날짜 형식
          */
-        if (cell.getCellType()
-                == CellType.NUMERIC
+        if (cell.getCellType() == CellType.NUMERIC
                 && DateUtil.isCellDateFormatted(cell)) {
 
             return cell.getLocalDateTimeCellValue();
         }
 
         throw new IllegalArgumentException(
-                "날짜 형식이 올바르지 않습니다. cellType="
+                "날짜 형식이 올바르지 않습니다. value="
+                        + cell.toString()
+                        + ", cellType="
                         + cell.getCellType()
         );
     }
@@ -310,7 +353,8 @@ public class TransactionProcessingService {
      * 거래처명을 기반으로 Category 검색
      */
     private Category findCategory(
-            String merchant
+            String merchant,
+            List<CategoryKeyword> keywords
     ) {
 
         if (merchant == null
@@ -318,9 +362,6 @@ public class TransactionProcessingService {
 
             return null;
         }
-
-        List<CategoryKeyword> keywords =
-                categoryKeywordRepository.findAll();
 
         for (CategoryKeyword categoryKeyword :
                 keywords) {
