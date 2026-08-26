@@ -46,70 +46,24 @@ public class AbnormalService {
             Member member
     ) {
 
-        List<Transaction> transactions =
-                transactionRepository.findByMemberOrderByDateDesc(member);
+        List<AbnormalTransaction> abnormalTransactions =
+                abnormalTransactionRepository
+                        .findByMemberAndTransaction_IsAbnormalTrue(member);
 
         List<AbnormalResDTO.AbnormalSpendingResDTO> result =
                 new ArrayList<>();
 
-        for (Transaction transaction : transactions) {
+        for (AbnormalTransaction abnormalTransaction
+                : abnormalTransactions) {
 
-            /*
-             * 지출만 조회
-             */
-            if (!isExpense(transaction)) {
-                continue;
-            }
+            Transaction transaction =
+                    abnormalTransaction.getTransaction();
 
-            /*
-             * 이상 지출로 판정된 거래만 조회
-             */
-            if (!Boolean.TRUE.equals(
-                    transaction.getIsAbnormal()
-            )) {
-                continue;
-            }
-
-            /*
-             * 저장된 이상 지출 정보
-             */
-            AbnormalTransaction abnormalTransaction =
-                    abnormalTransactionRepository
-                            .findByMemberAndTransaction(
-                                    member,
-                                    transaction
-                            )
-                            .orElse(null);
-
-            if (abnormalTransaction == null) {
-                continue;
-            }
-
-            /*
-             * ====================================================
-             * Ontology Context
-             *
-             * DB Category
-             *     식비
-             *
-             * Ontology Category
-             *     카페
-             *
-             * Parent Category
-             *     식비
-             * ====================================================
-             */
             TransactionResDTO.TransactionOntologyContext ontologyContext =
                     transactionOntologyService.getTransactionContext(
                             transaction.getId()
                     );
 
-            /*
-             * 화면에 보여줄 카테고리
-             *
-             * 소분류가 존재하면 소분류를 우선 사용
-             * 없으면 DB Category 사용
-             */
             String categoryName =
                     getDisplayCategory(
                             transaction,
@@ -118,35 +72,18 @@ public class AbnormalService {
 
             result.add(
                     AbnormalResDTO.AbnormalSpendingResDTO.builder()
-                            .transactionId(
-                                    transaction.getId()
-                            )
-                            .merchant(
-                                    transaction.getMerchant()
-                            )
-                            .amount(
-                                    transaction.getAmount()
-                            )
-                            .category(
-                                    categoryName
-                            )
-                            .date(
-                                    transaction.getDate()
-                            )
-                            .score(
-                                    abnormalTransaction.getScore()
-                            )
+                            .transactionId(transaction.getId())
+                            .merchant(transaction.getMerchant())
+                            .amount(transaction.getAmount())
+                            .category(categoryName)
+                            .date(transaction.getDate())
+                            .score(abnormalTransaction.getScore())
                             .type("RULE")
-                            .reason(
-                                    abnormalTransaction.getReason()
-                            )
+                            .reason(abnormalTransaction.getReason())
                             .build()
             );
         }
 
-        /*
-         * 높은 점수부터 정렬
-         */
         result.sort(
                 Comparator.comparing(
                         AbnormalResDTO.AbnormalSpendingResDTO::score

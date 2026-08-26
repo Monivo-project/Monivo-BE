@@ -5,6 +5,7 @@ import com.example.monivobe.domain.transaction.entity.AbnormalTransaction;
 import com.example.monivobe.domain.transaction.entity.Transaction;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.List;
 import java.util.Optional;
 
 public interface AbnormalTransactionRepository extends JpaRepository<AbnormalTransaction, Long> {
@@ -12,4 +13,6 @@ public interface AbnormalTransactionRepository extends JpaRepository<AbnormalTra
             Member member,
             Transaction transaction
     );
+
+    List<AbnormalTransaction> findByMemberAndTransaction_IsAbnormalTrue(Member member);
 }
