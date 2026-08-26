@@ -40,7 +40,7 @@ public class ExpectedBudgetService {
      *
      * 데이터가 없으면 AI 분석 후 생성
      */
-    @Transactional(readOnly = true)
+    @Transactional
     public HomeResDTO.ExpectedBudget getExpectedBudget(
             Member member,
             Integer year,
@@ -129,9 +129,7 @@ public class ExpectedBudgetService {
     /**
      * 선택한 월의 예상 지출 생성
      */
-    @Transactional(
-            propagation = Propagation.REQUIRES_NEW
-    )
+    @Transactional
     public HomeResDTO.ExpectedBudget createExpectedBudget(
             Member member,
             YearMonth targetMonth
