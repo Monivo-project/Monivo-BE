@@ -1,5 +1,6 @@
 package com.example.monivobe.domain.transaction.service;
 
+import com.example.monivobe.domain.home.service.ExpectedBudgetService;
 import com.example.monivobe.domain.member.entity.Member;
 import com.example.monivobe.domain.member.repository.MemberRepository;
 import com.example.monivobe.domain.transaction.entity.Category;
@@ -17,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.LocalDateTime;
+import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
@@ -29,24 +31,40 @@ public class TransactionProcessingService {
 
     private final MemberRepository memberRepository;
 
-    private final CategoryKeywordRepository
-            categoryKeywordRepository;
+    private final CategoryKeywordRepository categoryKeywordRepository;
 
-    private final TransactionAiService
-            transactionAiService;
+    private final TransactionAiService transactionAiService;
 
-    private final FileStorageService
-            fileStorageService;
+    private final FileStorageService fileStorageService;
 
-    private final TransactionOntologyService
-            transactionOntologyService;
+    private final TransactionOntologyService transactionOntologyService;
 
-    private final MerchantService
-            merchantService;
+    private final MerchantService merchantService;
+
+    /*
+     * ============================================================
+     * 예상 지출 서비스
+     * ============================================================
+     */
+    private final ExpectedBudgetService expectedBudgetService;
 
 
     /**
      * 거래내역 파일 처리
+     *
+     * 파일 업로드
+     *      ↓
+     * Excel 파싱
+     *      ↓
+     * Transaction 저장
+     *      ↓
+     * Merchant 저장
+     *      ↓
+     * Keyword 분류
+     *      ↓
+     * LLM 분류
+     *      ↓
+     * 예상 지출 생성
      *
      * @return 이번 파일 업로드로 새롭게 저장된 Transaction 목록
      */
@@ -71,7 +89,7 @@ public class TransactionProcessingService {
 
             /*
              * ====================================================
-             * CategoryKeyword는 한 번만 조회
+             * CategoryKeyword 조회
              * ====================================================
              */
 
@@ -108,8 +126,6 @@ public class TransactionProcessingService {
             /*
              * ====================================================
              * Transaction 저장
-             *
-             * 이번 파일에서 새롭게 생성된 거래들
              * ====================================================
              */
 
@@ -117,12 +133,6 @@ public class TransactionProcessingService {
                     transactionRepository.saveAll(
                             transactions
                     );
-
-
-            /*
-             * Merchant 연관관계 및 ID를
-             * 확실하게 DB에 반영
-             */
 
             transactionRepository.flush();
 
@@ -141,19 +151,23 @@ public class TransactionProcessingService {
 
             /*
              * ====================================================
-             * 미분류 거래 추출
+             * 미분류 지출 추출
+             *
+             * INCOME은 LLM 분류하지 않음
              * ====================================================
              */
 
-            List<Transaction>
-                    unclassifiedTransactions =
+            List<Transaction> unclassifiedTransactions =
                     savedTransactions.stream()
 
                             .filter(transaction ->
-                                    transaction
-                                            .getClassificationType()
-                                            == ClassificationType
-                                            .UNCONFIRMED
+                                    transaction.getClassificationType()
+                                            == ClassificationType.UNCONFIRMED
+                            )
+
+                            .filter(transaction ->
+                                    transaction.getTransactionType()
+                                            == TransactionType.EXPENSE
                             )
 
                             .toList();
@@ -176,11 +190,68 @@ public class TransactionProcessingService {
 
             /*
              * ====================================================
-             * 중요
+             * 예상 지출 생성
              *
+             * 중요:
+             *
+             * 페이지에 들어갈 때마다 생성하는 것이 아니라
+             *
+             * "파일 업로드가 완료된 시점"
+             *
+             * 에 생성한다.
+             *
+             * 거래내역의 날짜를 기준으로
+             * 해당 월의 예상 지출을 생성한다.
+             * ====================================================
+             */
+
+            savedTransactions.stream()
+
+                    .map(Transaction::getDate)
+
+                    .filter(date -> date != null)
+
+                    .map(YearMonth::from)
+
+                    .distinct()
+
+                    .forEach(targetMonth -> {
+
+                        try {
+
+                            expectedBudgetService
+                                    .getExpectedBudget(
+                                            member,
+                                            targetMonth.getYear(),
+                                            targetMonth.getMonthValue()
+                                    );
+
+                            System.out.println(
+                                    "[EXPECTED BUDGET] "
+                                            + targetMonth
+                                            + " 예상 지출 생성/조회 완료"
+                            );
+
+                        } catch (Exception e) {
+
+                            /*
+                             * 예상 지출 생성 실패가
+                             * 거래내역 저장 자체를 실패시키지 않도록
+                             * 별도로 로그만 남긴다.
+                             */
+                            System.err.println(
+                                    "[EXPECTED BUDGET] "
+                                            + targetMonth
+                                            + " 예상 지출 생성 실패: "
+                                            + e.getMessage()
+                            );
+                        }
+                    });
+
+
+            /*
+             * ====================================================
              * 이번 업로드에서 새롭게 저장된 거래만 반환
-             *
-             * 기존 Transaction은 반환하지 않음
              * ====================================================
              */
 
@@ -241,27 +312,39 @@ public class TransactionProcessingService {
 
                 /*
                  * ====================================================
-                 * 금액
+                 * 금액 컬럼
+                 *
+                 * index 3 = 4열
+                 * index 4 = 5열
+                 *
+                 * 4열 = 입금
+                 * 5열 = 지출
                  * ====================================================
                  */
 
-                Cell amountCell =
+                Cell incomeCell =
+                        row.getCell(3);
+
+                Cell expenseCell =
                         row.getCell(4);
 
 
                 /*
                  * ====================================================
                  * 합계 행 제외
-                 *
-                 * SUM(E6:E352) 같은 Formula는 거래가 아니므로
-                 * 제외
                  * ====================================================
                  */
 
                 if (
-                        amountCell != null
-                                && amountCell.getCellType()
-                                == CellType.FORMULA
+                        (incomeCell != null
+                                && incomeCell.getCellType()
+                                == CellType.FORMULA)
+
+                                ||
+
+                                (expenseCell != null
+                                        && expenseCell.getCellType()
+                                        == CellType.FORMULA)
                 ) {
 
                     continue;
@@ -286,30 +369,90 @@ public class TransactionProcessingService {
 
                 /*
                  * ====================================================
-                 * 거래 타입
+                 * 입금 / 지출 금액
+                 *
+                 * 4열(index 3)
+                 * 5열(index 4)
+                 *
+                 * 요구사항:
+                 *
+                 * 4열이 0이면
+                 *      5열의 금액을 INCOME
+                 *
+                 * 그 외에는
+                 *      4열의 금액을 EXPENSE
                  * ====================================================
                  */
 
-                String transactionTypeValue =
-                        getString(
-                                row.getCell(1)
+                Integer incomeAmount =
+                        getInteger(
+                                incomeCell
                         );
+
+                Integer expenseAmount =
+                        getInteger(
+                                expenseCell
+                        );
+
 
                 TransactionType transactionType;
 
+                Integer amount;
+
+
+                /*
+                 * ====================================================
+                 * 4열 = 0
+                 *
+                 * 4열 = 0
+                 * 5열 = 100,000
+                 *
+                 * → INCOME
+                 * → amount = 100,000
+                 * ====================================================
+                 */
+
                 if (
-                        "입금".equals(
-                                transactionTypeValue
-                        )
+                        incomeAmount != null
+                                && incomeAmount == 0
                 ) {
 
                     transactionType =
                             TransactionType.INCOME;
 
+                    amount =
+                            expenseAmount;
+
                 } else {
+
+                    /*
+                     * =================================================
+                     * 일반 지출
+                     *
+                     * 4열 = 50,000
+                     * 5열 = 0
+                     *
+                     * → EXPENSE
+                     * → amount = 50,000
+                     * =================================================
+                     */
 
                     transactionType =
                             TransactionType.EXPENSE;
+
+                    amount =
+                            incomeAmount;
+                }
+
+
+                /*
+                 * ====================================================
+                 * 금액이 없는 행 제외
+                 * ====================================================
+                 */
+
+                if (amount == null) {
+                    continue;
                 }
 
 
@@ -324,30 +467,18 @@ public class TransactionProcessingService {
                                 row.getCell(2)
                         );
 
+                if (
+                        merchant == null
+                                || merchant.isBlank()
+                ) {
 
-                /*
-                 * ====================================================
-                 * 금액
-                 * ====================================================
-                 */
-
-                Integer amount =
-                        getInteger(
-                                amountCell
-                        );
+                    continue;
+                }
 
 
                 /*
                  * ====================================================
                  * Transaction 생성
-                 *
-                 * 생성자에서
-                 *
-                 * classificationType = UNCLASSIFIED
-                 * isAbnormal = false
-                 * confidence = false
-                 *
-                 * 로 초기화됨
                  * ====================================================
                  */
 
@@ -363,13 +494,9 @@ public class TransactionProcessingService {
 
                 /*
                  * ====================================================
-                 * Merchant 검색
+                 * Merchant 검색 / 생성
                  *
-                 * 1. DB 검색
-                 * 2. 없으면 Kakao + Naver
-                 * 3. 교차검증
-                 * 4. Merchant 저장
-                 * 5. Transaction 연결
+                 * INCOME / EXPENSE 모두 Merchant 저장
                  * ====================================================
                  */
 
@@ -384,39 +511,75 @@ public class TransactionProcessingService {
 
                 /*
                  * ====================================================
-                 * CategoryKeyword 검색
+                 * 카테고리 분류
+                 *
+                 * INCOME
+                 *      → 소비 카테고리 분류 X
+                 *
+                 * EXPENSE
+                 *      → Keyword
+                 *      → UNCONFIRMED
+                 *      → LLM
                  * ====================================================
                  */
 
-                Category category =
-                        findCategory(
-                                merchant,
-                                keywords
+                if (
+                        transactionType
+                                == TransactionType.EXPENSE
+                ) {
+
+                    Category category =
+                            findCategory(
+                                    merchant,
+                                    keywords
+                            );
+
+                    if (category != null) {
+
+                        transaction.setCategory(
+                                category
                         );
 
-                if (category != null) {
+                        transaction.setClassificationType(
+                                ClassificationType.KEYWORD
+                        );
 
-                    transaction.setCategory(
-                            category
-                    );
+                    } else {
 
-                    transaction.setClassificationType(
-                            ClassificationType.KEYWORD
-                    );
+                        transaction.setClassificationType(
+                                ClassificationType.UNCONFIRMED
+                        );
+                    }
 
                 } else {
 
+                    /*
+                     * =================================================
+                     * INCOME
+                     *
+                     * 소비 카테고리 분류 대상이 아님
+                     * =================================================
+                     */
+
                     transaction.setClassificationType(
-                            ClassificationType.UNCONFIRMED
+                            ClassificationType.UNCLASSIFIED
                     );
                 }
 
 
                 /*
                  * ====================================================
-                 * 새로운 Transaction 목록에 추가
+                 * 로그
                  * ====================================================
                  */
+
+                System.out.println(
+                        "거래 저장: "
+                                + "merchant=" + merchant
+                                + ", amount=" + amount
+                                + ", type=" + transactionType
+                );
+
 
                 transactions.add(
                         transaction
@@ -588,6 +751,7 @@ public class TransactionProcessingService {
 
             if (
                     keyword != null
+                            && !keyword.isBlank()
                             && merchant.contains(
                             keyword
                     )

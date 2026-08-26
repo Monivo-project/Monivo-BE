@@ -729,10 +729,16 @@ public class MerchantService {
         // ========================================================
 
         log.warn(
-                "[MATCH] Kakao와 Naver 모두 검색 결과가 없습니다."
+                "[MATCH] 외부 API 매칭 실패. 거래처명만으로 Merchant를 생성합니다. merchantName={}",
+                merchantName
         );
 
-        return null;
+        return Merchant.builder()
+                .name(merchantName)
+                .normalizedName(normalizeMerchant(merchantName))
+                .source("UNKNOWN")
+                .confidence(0.30)
+                .build();
     }
 
 

@@ -48,36 +48,20 @@ public class ExpectedBudgetService {
         YearMonth targetMonth =
                 YearMonth.of(year, month);
 
-        /*
-         * 해당 회원 + 해당 연도 + 해당 월의
-         * 예상 지출 데이터가 이미 존재하는지 확인
-         */
-        Optional<ExpectedBudget> budget =
+        ExpectedBudget budget =
                 expectedBudgetRepository
                         .findByMemberAndTargetYearAndTargetMonth(
                                 member,
                                 targetMonth.getYear(),
                                 targetMonth.getMonthValue()
+                        )
+                        .orElseThrow(() ->
+                                new IllegalStateException(
+                                        "해당 월의 예상 지출 데이터가 없습니다."
+                                )
                         );
 
-        /*
-         * 이미 생성된 데이터가 있으면
-         * AI를 다시 호출하지 않고 DB 데이터 반환
-         */
-        if (budget.isPresent()) {
-
-            return HomeConverter.toResponse(
-                    budget.get()
-            );
-        }
-
-        /*
-         * 데이터가 없다면 AI 분석 후 생성
-         */
-        return createExpectedBudget(
-                member,
-                targetMonth
-        );
+        return HomeConverter.toResponse(budget);
     }
 
 
