@@ -1,13 +1,16 @@
 package com.example.monivobe.domain.consumption.service;
 
 import com.example.monivobe.domain.consumption.converter.ConsumptionConverter;
+import com.example.monivobe.domain.consumption.dto.ConsumptionReqDTO;
 import com.example.monivobe.domain.consumption.dto.ConsumptionResDTO;
 import com.example.monivobe.domain.member.entity.Member;
 import com.example.monivobe.domain.transaction.entity.Category;
+import com.example.monivobe.domain.transaction.entity.MemberCategoryKeyword;
 import com.example.monivobe.domain.transaction.entity.Transaction;
 import com.example.monivobe.domain.transaction.enums.ClassificationType;
 import com.example.monivobe.domain.transaction.enums.TransactionType;
 import com.example.monivobe.domain.transaction.repository.CategoryRepository;
+import com.example.monivobe.domain.transaction.repository.MemberCategoryKeywordRepository;
 import com.example.monivobe.domain.transaction.repository.TransactionRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -27,6 +30,7 @@ public class ConsumptionService {
 
     private final TransactionRepository transactionRepository;
     private final CategoryRepository categoryRepository;
+    private final MemberCategoryKeywordRepository memberCategoryKeywordRepository;
 
 
     /**
@@ -393,5 +397,89 @@ public class ConsumptionService {
         return ConsumptionResDTO.GetCategory.builder()
                 .categories(categoryList)
                 .build();
+    }
+
+
+
+    @Transactional
+    public Transaction updateCategory(
+            Long transactionId,
+            Long categoryId,
+            Member member
+    ) {
+
+        // 1. 거래 조회
+        Transaction transaction = transactionRepository
+                .findById(transactionId)
+                .orElseThrow(() ->
+                        new IllegalArgumentException(
+                                "거래 내역을 찾을 수 없습니다."
+                        )
+                );
+
+        // 2. 본인 거래인지 확인
+        if (!transaction.getMember().getId().equals(member.getId())) {
+            throw new IllegalArgumentException(
+                    "본인의 거래만 수정할 수 있습니다."
+            );
+        }
+
+        // 3. 카테고리 조회
+        Category category = categoryRepository
+                .findById(categoryId)
+                .orElseThrow(() ->
+                        new IllegalArgumentException(
+                                "카테고리를 찾을 수 없습니다."
+                        )
+                );
+
+        // 4. 거래의 카테고리 변경
+        transaction.setCategory(category);
+
+        // 5. 사용자가 직접 수정했으므로 USER로 변경
+        transaction.setClassificationType(
+                ClassificationType.USER
+        );
+
+        // 6. 사용자 키워드 생성/수정
+        String keyword = transaction.getNormalizedMerchant();
+
+        // normalizedMerchant가 없는 경우 merchant 사용
+        if (keyword == null || keyword.isBlank()) {
+            keyword = transaction.getMerchant();
+        }
+
+        // keyword가 존재하는 경우에만 저장
+        if (keyword != null && !keyword.isBlank()) {
+
+            // 7. 기존 사용자 키워드 검색
+            MemberCategoryKeyword memberCategoryKeyword =
+                    memberCategoryKeywordRepository
+                            .findByMemberAndKeyword(member, keyword)
+                            .orElse(null);
+
+            if (memberCategoryKeyword == null) {
+
+                // 8. 기존 키워드가 없으면 새로 생성
+                memberCategoryKeyword =
+                        new MemberCategoryKeyword(
+                                member,
+                                keyword,
+                                category
+                        );
+
+                memberCategoryKeywordRepository.save(
+                        memberCategoryKeyword
+                );
+
+            } else {
+
+                // 9. 기존 키워드가 있으면 카테고리 변경
+                memberCategoryKeyword.updateCategory(category);
+            }
+        }
+
+        // 10. Transaction 반환
+        return transaction;
     }
 }

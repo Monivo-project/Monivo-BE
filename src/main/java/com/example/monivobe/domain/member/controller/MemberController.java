@@ -48,7 +48,7 @@ public class MemberController {
 
     // 사용자 이름
     @GetMapping("/users/me/name")
-    public ApiResponse<String> getName(
+    public ApiResponse<MemberResDTO.GetMember> getName(
             @AuthenticationPrincipal AuthMember authMember
     ){
         BaseSuccessCode code = MemberSuccessCode.MEMBER_GET_SUCCESS;

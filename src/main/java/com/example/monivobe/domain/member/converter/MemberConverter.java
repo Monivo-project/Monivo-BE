@@ -18,4 +18,12 @@ public class MemberConverter {
     public static MemberResDTO.Login toLogin(String accessToken) {
         return new MemberResDTO.Login(accessToken);
     }
+
+    public static MemberResDTO.GetMember toGetMember(Member member) {
+        return MemberResDTO.GetMember.builder()
+                .id(member.getId())
+                .name(member.getName())
+                .email(member.getEmail())
+                .build();
+    }
 }

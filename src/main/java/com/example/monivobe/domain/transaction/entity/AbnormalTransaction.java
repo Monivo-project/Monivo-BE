@@ -8,33 +8,32 @@ import lombok.NoArgsConstructor;
 @Entity
 @Getter
 @NoArgsConstructor
-public class MemberCategoryKeyword {
-
+public class AbnormalTransaction {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    private String keyword;
-
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "member_id")
+    @JoinColumn(name = "member_id", nullable = false)
     private Member member;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "category_id")
-    private Category category;
+    @JoinColumn(name = "transaction_id")
+    private Transaction transaction;
 
-    public MemberCategoryKeyword(
+    private String reason;
+
+    private Integer score;
+
+    public AbnormalTransaction(
             Member member,
-            String keyword,
-            Category category
+            Transaction transaction,
+            String reason,
+            Integer score
     ) {
         this.member = member;
-        this.keyword = keyword;
-        this.category = category;
-    }
-
-    public void updateCategory(Category category) {
-        this.category = category;
+        this.transaction = transaction;
+        this.reason = reason;
+        this.score = score;
     }
 }
