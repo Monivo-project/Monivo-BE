@@ -49,6 +49,10 @@ public class Transaction {
     @Column(nullable = false)
     private TransactionType transactionType;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "merchant_id")
+    private Merchant merchantInfo;
+
     public Transaction(
             Member member,
             String merchant,

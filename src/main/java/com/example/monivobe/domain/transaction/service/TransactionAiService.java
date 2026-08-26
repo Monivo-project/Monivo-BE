@@ -19,97 +19,214 @@ import java.util.List;
 public class TransactionAiService {
 
     private final TransactionRepository transactionRepository;
+
     private final CategoryRepository categoryRepository;
+
     private final ChatClient chatClient;
-    private final TransactionPromptService transactionPromptService;
+
+    private final TransactionPromptService
+            transactionPromptService;
+
+    private final TransactionOntologyService
+            transactionOntologyService;
+
 
     @Transactional
     public void classifyUnclassifiedTransactions(
             List<Transaction> transactions
     ) {
 
-        if (transactions == null || transactions.isEmpty()) {
+        if (
+                transactions == null
+                        || transactions.isEmpty()
+        ) {
+
             return;
         }
 
-        List<Transaction> unclassifiedTransactions =
+        /*
+         * 미분류 거래만 선택
+         */
+        List<Transaction>
+                unclassifiedTransactions =
+
                 transactions.stream()
+
                         .filter(transaction ->
-                                transaction.getClassificationType()
-                                        == ClassificationType.UNCONFIRMED
+                                transaction
+                                        .getClassificationType()
+                                        == ClassificationType
+                                        .UNCONFIRMED
                         )
+
                         .toList();
 
-        if (unclassifiedTransactions.isEmpty()) {
+        if (
+                unclassifiedTransactions
+                        .isEmpty()
+        ) {
+
             return;
         }
 
-        List<AiResponse.TransactionClassification> results =
-                classifyByLlm(unclassifiedTransactions);
 
-        for (AiResponse.TransactionClassification result : results) {
+        /*
+         * LLM 분류
+         */
+        List<AiResponse.TransactionClassification>
+                results =
+
+                classifyByLlm(
+                        unclassifiedTransactions
+                );
+
+
+        /*
+         * LLM 결과 반영
+         */
+        for (
+                AiResponse.TransactionClassification result
+                : results
+        ) {
 
             Transaction transaction =
-                    transactionRepository.findById(
-                            result.transactionId()
-                    ).orElseThrow(() ->
-                            new IllegalArgumentException(
-                                    "거래내역을 찾을 수 없습니다. id="
-                                            + result.transactionId()
+                    transactionRepository
+                            .findById(
+                                    result.transactionId()
                             )
-                    );
 
-            // 신뢰도가 낮거나 카테고리가 없는 경우
-            if (result.confidence() == null
-                    || result.confidence() < 0.7
-                    || result.categoryId() == null) {
+                            .orElseThrow(() ->
+                                    new IllegalArgumentException(
+                                            "거래내역을 찾을 수 없습니다. id="
+                                                    + result
+                                                    .transactionId()
+                                    )
+                            );
+
+
+            /*
+             * 신뢰도 부족
+             */
+            if (
+                    result.confidence() == null
+                            || result.confidence() < 0.7
+                            || result.categoryId() == null
+            ) {
 
                 transaction.setClassificationType(
                         ClassificationType.UNCONFIRMED
                 );
 
+                transactionOntologyService
+                        .updateClassification(
+                                transaction
+                        );
+
                 continue;
             }
 
-            Category category =
-                    categoryRepository.findById(
-                            result.categoryId()
-                    ).orElseThrow(() ->
-                            new IllegalArgumentException(
-                                    "카테고리를 찾을 수 없습니다. id="
-                                            + result.categoryId()
-                            )
-                    );
 
-            transaction.setCategory(category);
+            /*
+             * Category 조회
+             */
+            Category category =
+                    categoryRepository
+                            .findById(
+                                    result.categoryId()
+                            )
+
+                            .orElseThrow(() ->
+                                    new IllegalArgumentException(
+                                            "카테고리를 찾을 수 없습니다. id="
+                                                    + result
+                                                    .categoryId()
+                                    )
+                            );
+
+
+            /*
+             * Category 설정
+             */
+            transaction.setCategory(
+                    category
+            );
 
             transaction.setClassificationType(
                     ClassificationType.LLM
             );
+
+
+            /*
+             * DB 저장
+             */
+            transactionRepository.save(
+                    transaction
+            );
+
+
+            /*
+             * Ontology 업데이트
+             */
+            transactionOntologyService
+                    .updateClassification(
+                            transaction
+                    );
         }
     }
 
-    private List<AiResponse.TransactionClassification> classifyByLlm(
+
+    /**
+     * LLM 호출
+     */
+    private List<AiResponse.TransactionClassification>
+    classifyByLlm(
             List<Transaction> transactions
     ) {
 
-        if (transactions == null || transactions.isEmpty()) {
+        if (
+                transactions == null
+                        || transactions.isEmpty()
+        ) {
+
             return List.of();
         }
 
+
+        /*
+         * 전체 카테고리 조회
+         */
         List<Category> categories =
                 categoryRepository.findAll();
 
-        String prompt =
-                transactionPromptService.createClassificationPrompt(
-                        categories,
-                        transactions
-                );
 
-        List<AiResponse.TransactionClassification> result =
-                chatClient.prompt()
+        /*
+         * Prompt 생성
+         *
+         * 여기서 Merchant 정보도
+         * 함께 전달된다.
+         */
+        String prompt =
+                transactionPromptService
+                        .createClassificationPrompt(
+                                categories,
+                                transactions
+                        );
+
+
+        /*
+         * LLM 호출
+         */
+        List<AiResponse.TransactionClassification>
+                result =
+
+                chatClient
+
+                        .prompt()
+
                         .user(prompt)
+
                         .call()
+
                         .entity(
                                 new ParameterizedTypeReference<
                                         List<AiResponse.TransactionClassification>
@@ -117,6 +234,9 @@ public class TransactionAiService {
                                 }
                         );
 
-        return result != null ? result : List.of();
+
+        return result != null
+                ? result
+                : List.of();
     }
 }

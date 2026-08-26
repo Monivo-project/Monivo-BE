@@ -1,0 +1,175 @@
+@prefix monivo: <http://monivo.com/ontology#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+##################################################
+# Category
+##################################################
+
+monivo:ConsumptionCategory
+    a rdfs:Class .
+
+monivo:Food
+    a monivo:ConsumptionCategory ;
+    rdfs:label "식비"@ko .
+
+monivo:Shopping
+    a monivo:ConsumptionCategory ;
+    rdfs:label "쇼핑"@ko .
+
+monivo:Transportation
+    a monivo:ConsumptionCategory ;
+    rdfs:label "교통"@ko .
+
+monivo:Housing
+    a monivo:ConsumptionCategory ;
+    rdfs:label "주거/통신"@ko .
+
+monivo:Culture
+    a monivo:ConsumptionCategory ;
+    rdfs:label "여가/문화"@ko .
+
+monivo:Healthcare
+    a monivo:ConsumptionCategory ;
+    rdfs:label "의료/건강"@ko .
+
+monivo:Education
+    a monivo:ConsumptionCategory ;
+    rdfs:label "교육"@ko .
+
+monivo:Travel
+    a monivo:ConsumptionCategory ;
+    rdfs:label "여행"@ko .
+
+monivo:Finance
+    a monivo:ConsumptionCategory ;
+    rdfs:label "금융"@ko .
+
+monivo:Gift
+    a monivo:ConsumptionCategory ;
+    rdfs:label "선물/경조사"@ko .
+
+monivo:Pet
+    a monivo:ConsumptionCategory ;
+    rdfs:label "반려동물"@ko .
+
+monivo:Etc
+    a monivo:ConsumptionCategory ;
+    rdfs:label "기타"@ko .
+
+
+##################################################
+# Sub Category
+##################################################
+
+monivo:Cafe
+    a monivo:ConsumptionCategory ;
+    rdfs:label "카페"@ko ;
+    monivo:belongsTo monivo:Food .
+
+monivo:Restaurant
+    a monivo:ConsumptionCategory ;
+    rdfs:label "외식"@ko ;
+    monivo:belongsTo monivo:Food .
+
+monivo:Delivery
+    a monivo:ConsumptionCategory ;
+    rdfs:label "배달"@ko ;
+    monivo:belongsTo monivo:Food .
+
+monivo:ConvenienceStore
+    a monivo:ConsumptionCategory ;
+    rdfs:label "편의점"@ko ;
+    monivo:belongsTo monivo:Food .
+
+
+monivo:Fashion
+    a monivo:ConsumptionCategory ;
+    rdfs:label "의류"@ko ;
+    monivo:belongsTo monivo:Shopping .
+
+monivo:OnlineShopping
+    a monivo:ConsumptionCategory ;
+    rdfs:label "온라인 쇼핑"@ko ;
+    monivo:belongsTo monivo:Shopping .
+
+monivo:Household
+    a monivo:ConsumptionCategory ;
+    rdfs:label "생활용품"@ko ;
+    monivo:belongsTo monivo:Shopping .
+
+
+monivo:PublicTransport
+    a monivo:ConsumptionCategory ;
+    rdfs:label "대중교통"@ko ;
+    monivo:belongsTo monivo:Transportation .
+
+monivo:Taxi
+    a monivo:ConsumptionCategory ;
+    rdfs:label "택시"@ko ;
+    monivo:belongsTo monivo:Transportation .
+
+monivo:Fuel
+    a monivo:ConsumptionCategory ;
+    rdfs:label "주유"@ko ;
+    monivo:belongsTo monivo:Transportation .
+
+
+monivo:Movie
+    a monivo:ConsumptionCategory ;
+    rdfs:label "영화"@ko ;
+    monivo:belongsTo monivo:Culture .
+
+monivo:OTT
+    a monivo:ConsumptionCategory ;
+    rdfs:label "OTT"@ko ;
+    monivo:belongsTo monivo:Culture .
+
+monivo:Game
+    a monivo:ConsumptionCategory ;
+    rdfs:label "게임"@ko ;
+    monivo:belongsTo monivo:Culture .
+
+
+##################################################
+# Merchant
+##################################################
+
+monivo:Starbucks
+    a monivo:Merchant ;
+    rdfs:label "스타벅스"@ko ;
+    monivo:hasBusinessType monivo:Cafe .
+
+monivo:McDonalds
+    a monivo:Merchant ;
+    rdfs:label "맥도날드"@ko ;
+    monivo:hasBusinessType monivo:Restaurant .
+
+monivo:Baemin
+    a monivo:Merchant ;
+    rdfs:label "배달의민족"@ko ;
+    monivo:hasBusinessType monivo:Delivery .
+
+monivo:Coupang
+    a monivo:Merchant ;
+    rdfs:label "쿠팡"@ko ;
+    monivo:hasBusinessType monivo:OnlineShopping .
+
+monivo:Netflix
+    a monivo:Merchant ;
+    rdfs:label "넷플릭스"@ko ;
+    monivo:hasBusinessType monivo:OTT .
+
+
+##################################################
+# Relations
+##################################################
+
+monivo:belongsTo
+    a rdf:Property .
+
+monivo:hasBusinessType
+    a rdf:Property .
+
+monivo:hasConsumptionType
+    a rdf:Property .

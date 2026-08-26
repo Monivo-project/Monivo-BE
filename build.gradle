@@ -50,6 +50,11 @@ dependencies {
     // S3
     implementation 'software.amazon.awssdk:s3:2.27.21'
 
+    // Jena
+    implementation 'org.apache.jena:jena-core:5.3.0'
+    implementation 'org.apache.jena:jena-arq:5.3.0'
+    implementation 'org.apache.jena:jena-tdb2:5.3.0'
+
     compileOnly 'org.projectlombok:lombok'
     runtimeOnly 'com.mysql:mysql-connector-j'
     annotationProcessor 'org.projectlombok:lombok'

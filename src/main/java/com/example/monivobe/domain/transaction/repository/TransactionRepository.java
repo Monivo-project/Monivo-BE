@@ -2,6 +2,7 @@ package com.example.monivobe.domain.transaction.repository;
 
 import com.example.monivobe.domain.member.entity.Member;
 import com.example.monivobe.domain.transaction.entity.Transaction;
+import com.example.monivobe.domain.transaction.enums.Status;
 import com.example.monivobe.domain.transaction.enums.TransactionType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -239,4 +240,17 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             @Param("endDate") LocalDateTime endDate,
             @Param("transactionType") TransactionType transactionType
     );
+
+
+
+
+    // settings
+    List<Transaction> findByMemberAndMerchantOrderByDateDesc(
+            Member member,
+            String merchant
+    );
+
+    List<Transaction> findByMemberOrderByDateDesc(Member member);
+
+
 }

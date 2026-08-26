@@ -28,4 +28,11 @@ public class MemberResDTO {
             );
         }
     }
+
+    @Builder
+    public record GetMember(
+            Long id,
+            String name,
+            String email
+    ) {}
 }

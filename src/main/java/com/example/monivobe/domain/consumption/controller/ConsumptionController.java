@@ -1,8 +1,10 @@
 package com.example.monivobe.domain.consumption.controller;
 
+import com.example.monivobe.domain.consumption.dto.ConsumptionReqDTO;
 import com.example.monivobe.domain.consumption.dto.ConsumptionResDTO;
 import com.example.monivobe.domain.consumption.exception.code.ConsumptionSuccessCode;
 import com.example.monivobe.domain.consumption.service.ConsumptionService;
+import com.example.monivobe.domain.transaction.entity.Transaction;
 import com.example.monivobe.global.apiPayload.ApiResponse;
 import com.example.monivobe.global.apiPayload.code.BaseSuccessCode;
 import com.example.monivobe.global.security.entity.AuthMember;
@@ -89,4 +91,30 @@ public class ConsumptionController {
         BaseSuccessCode code = ConsumptionSuccessCode.CONSUMPTION_GET_SUCCESS;
         return ApiResponse.onSuccess(code, consumptionService.getCategories(authMember.getMember()));
     }
+
+
+    // 거래 내역 수정
+    @PatchMapping("/{transactionId}/category/{categoryId}")
+    public ApiResponse<Object> updateCategory(
+            @PathVariable Long transactionId,
+            @PathVariable Long categoryId,
+            @AuthenticationPrincipal AuthMember authMember
+    ) {
+
+        Transaction transaction =
+                consumptionService.updateCategory(
+                        transactionId,
+                        categoryId,
+                        authMember.getMember()
+                );
+
+        BaseSuccessCode code =
+                ConsumptionSuccessCode.CONSUMPTION_GET_SUCCESS;
+
+        return ApiResponse.onSuccess(
+                code,
+                transaction
+        );
+    }
+
 }

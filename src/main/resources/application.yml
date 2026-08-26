@@ -1,5 +1,6 @@
 server:
   forward-headers-strategy: framework
+
   servlet:
     session:
       cookie:
@@ -66,3 +67,19 @@ cloud:
   aws:
     s3:
       bucket: monivo-bucket
+
+# ==========================
+# Naver Local Search API
+# ==========================
+naver:
+  api:
+    client-id: ${NAVER_CLIENT_ID}
+    client-secret: ${NAVER_CLIENT_SECRET}
+    local-search-url: https://openapi.naver.com/v1/search/local.json
+
+# ==========================
+# Kakao Local API
+# ==========================
+kakao:
+  api:
+    key: ${KAKAO_REST_API_KEY}
