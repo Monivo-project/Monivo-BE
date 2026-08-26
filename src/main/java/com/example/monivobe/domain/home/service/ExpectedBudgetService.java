@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.util.List;
@@ -35,8 +36,9 @@ public class ExpectedBudgetService {
     /**
      * 선택한 월의 예상 지출 조회
      *
-     * 예:
-     * /api/home/expected-budget?year=2026&month=8
+     * 데이터가 이미 있으면 DB 조회
+     *
+     * 데이터가 없으면 AI 분석 후 생성
      */
     @Transactional(readOnly = true)
     public HomeResDTO.ExpectedBudget getExpectedBudget(
@@ -48,28 +50,84 @@ public class ExpectedBudgetService {
         YearMonth targetMonth =
                 YearMonth.of(year, month);
 
-        ExpectedBudget budget =
+        Optional<ExpectedBudget> budget =
                 expectedBudgetRepository
                         .findByMemberAndTargetYearAndTargetMonth(
                                 member,
                                 targetMonth.getYear(),
                                 targetMonth.getMonthValue()
-                        )
-                        .orElseThrow(() ->
-                                new IllegalStateException(
-                                        "해당 월의 예상 지출 데이터가 없습니다."
-                                )
                         );
 
-        return HomeConverter.toResponse(budget);
+        /*
+         * 이미 존재하면 DB 데이터 반환
+         */
+        if (budget.isPresent()) {
+
+            return HomeConverter.toResponse(
+                    budget.get()
+            );
+        }
+
+        /*
+         * 없으면 생성
+         */
+        return createExpectedBudget(
+                member,
+                targetMonth
+        );
+    }
+
+
+    /**
+     * 파일 업로드 후 예상 지출 생성
+     *
+     * 이미 존재하는 월이라면 다시 AI를 호출하지 않는다.
+     *
+     * 따라서 Excel을 여러 번 업로드해도
+     * 동일한 월의 예상 지출이 계속 INSERT되지 않는다.
+     */
+    @Transactional(
+            propagation = Propagation.REQUIRES_NEW
+    )
+    public void createExpectedBudgetIfNotExists(
+            Member member,
+            YearMonth targetMonth
+    ) {
+
+        /*
+         * 이미 존재하는 예상 지출인지 확인
+         */
+        Optional<ExpectedBudget> existing =
+                expectedBudgetRepository
+                        .findByMemberAndTargetYearAndTargetMonth(
+                                member,
+                                targetMonth.getYear(),
+                                targetMonth.getMonthValue()
+                        );
+
+        if (existing.isPresent()) {
+
+            System.out.println(
+                    "[EXPECTED BUDGET] "
+                            + targetMonth
+                            + " 이미 존재함"
+            );
+
+            return;
+        }
+
+        /*
+         * 예상 지출 생성
+         */
+        createExpectedBudget(
+                member,
+                targetMonth
+        );
     }
 
 
     /**
      * 선택한 월의 예상 지출 생성
-     *
-     * DB INSERT가 발생하므로
-     * 새로운 쓰기 트랜잭션에서 실행
      */
     @Transactional(
             propagation = Propagation.REQUIRES_NEW
@@ -80,11 +138,14 @@ public class ExpectedBudgetService {
     ) {
 
         /*
-         * AI 분석에 사용할 기간
+         * ====================================================
+         * AI 분석 기간
          *
-         * 선택한 월 기준으로
-         * 이전 6개월 + 선택한 월 데이터를 조회
+         * 선택한 월 기준
+         * 이전 6개월 + 선택한 월
+         * ====================================================
          */
+
         YearMonth analysisStartMonth =
                 targetMonth.minusMonths(6);
 
@@ -101,8 +162,11 @@ public class ExpectedBudgetService {
 
 
         /*
+         * ====================================================
          * 거래내역 조회
+         * ====================================================
          */
+
         List<Transaction> transactions =
                 transactionRepository
                         .findByMemberAndDateBetweenOrderByDateAsc(
@@ -113,23 +177,30 @@ public class ExpectedBudgetService {
 
 
         /*
+         * ====================================================
          * 월별 지출
          *
          * EXPENSE만 계산
+         * ====================================================
          */
+
         Map<YearMonth, Integer> monthlyAmount =
                 transactions.stream()
+
                         .filter(transaction ->
                                 transaction.getTransactionType()
                                         == TransactionType.EXPENSE
                         )
+
                         .collect(
                                 Collectors.groupingBy(
                                         transaction ->
                                                 YearMonth.from(
                                                         transaction.getDate()
                                                 ),
+
                                         TreeMap::new,
+
                                         Collectors.summingInt(
                                                 Transaction::getAmount
                                         )
@@ -138,25 +209,32 @@ public class ExpectedBudgetService {
 
 
         /*
+         * ====================================================
          * 카테고리별 지출
          *
          * EXPENSE만 계산
+         * ====================================================
          */
+
         Map<String, Integer> categoryAmount =
                 transactions.stream()
+
                         .filter(transaction ->
                                 transaction.getTransactionType()
                                         == TransactionType.EXPENSE
                         )
+
                         .filter(transaction ->
                                 transaction.getCategory() != null
                         )
+
                         .collect(
                                 Collectors.groupingBy(
                                         transaction ->
                                                 transaction
                                                         .getCategory()
                                                         .getName(),
+
                                         Collectors.summingInt(
                                                 Transaction::getAmount
                                         )
@@ -165,8 +243,11 @@ public class ExpectedBudgetService {
 
 
         /*
+         * ====================================================
          * 선택한 월의 현재 지출
+         * ====================================================
          */
+
         int currentAmount =
                 monthlyAmount.getOrDefault(
                         targetMonth,
@@ -175,14 +256,11 @@ public class ExpectedBudgetService {
 
 
         /*
-         * 현재 날짜가 선택한 월에 포함되는지 확인
-         *
-         * 현재 달이면
-         * 오늘까지의 날짜를 사용
-         *
-         * 과거 달이면
-         * 해당 월 전체 날짜를 사용
+         * ====================================================
+         * 현재까지 경과한 날짜
+         * ====================================================
          */
+
         YearMonth currentMonth =
                 YearMonth.now();
 
@@ -191,7 +269,7 @@ public class ExpectedBudgetService {
         if (targetMonth.equals(currentMonth)) {
 
             currentDays =
-                    java.time.LocalDate.now()
+                    LocalDate.now()
                             .getDayOfMonth();
 
         } else {
@@ -201,13 +279,22 @@ public class ExpectedBudgetService {
         }
 
 
+        /*
+         * ====================================================
+         * 해당 월 전체 날짜
+         * ====================================================
+         */
+
         int totalDays =
                 targetMonth.lengthOfMonth();
 
 
         /*
-         * AI 분석 요청 데이터 생성
+         * ====================================================
+         * AI 분석 요청 데이터
+         * ====================================================
          */
+
         HomeAiReqDTO.SpendingAnalysis analysis =
                 HomeAiReqDTO.SpendingAnalysis.builder()
 
@@ -260,7 +347,7 @@ public class ExpectedBudgetService {
                         )
 
                         /*
-                         * 현재까지 지난 날짜
+                         * 현재까지 경과한 날짜
                          */
                         .currentMonthDays(
                                 currentDays
@@ -277,8 +364,11 @@ public class ExpectedBudgetService {
 
 
         /*
-         * AI 예상 지출 계산
+         * ====================================================
+         * AI 예상 지출
+         * ====================================================
          */
+
         HomeAiResDTO.ExpectedBudgetResult result =
                 budgetPredictionService.predict(
                         analysis
@@ -286,8 +376,11 @@ public class ExpectedBudgetService {
 
 
         /*
+         * ====================================================
          * 예상 지출 - 현재 지출
+         * ====================================================
          */
+
         int remainingExpectedAmount =
                 Math.max(
                         result.expectedAmount()
@@ -297,22 +390,20 @@ public class ExpectedBudgetService {
 
 
         /*
-         * 예상 지출 DB Entity 생성
+         * ====================================================
+         * ExpectedBudget Entity 생성
+         * ====================================================
          */
+
         ExpectedBudget expectedBudget =
                 ExpectedBudget.builder()
+
                         .member(member)
 
-                        /*
-                         * 선택한 연도
-                         */
                         .targetYear(
                                 targetMonth.getYear()
                         )
 
-                        /*
-                         * 선택한 월
-                         */
                         .targetMonth(
                                 targetMonth.getMonthValue()
                         )
@@ -353,18 +444,53 @@ public class ExpectedBudgetService {
 
 
         /*
+         * ====================================================
          * DB 저장
+         * ====================================================
          */
+
         expectedBudgetRepository.save(
                 expectedBudget
         );
 
 
         /*
+         * ====================================================
          * 응답
+         * ====================================================
          */
+
         return HomeConverter.toResponse(
                 expectedBudget
+        );
+    }
+
+    @Transactional
+    public HomeResDTO.ExpectedBudget refreshExpectedBudget(
+            Member member,
+            YearMonth targetMonth
+    ) {
+
+        Optional<ExpectedBudget> existingBudget =
+                expectedBudgetRepository
+                        .findByMemberAndTargetYearAndTargetMonth(
+                                member,
+                                targetMonth.getYear(),
+                                targetMonth.getMonthValue()
+                        );
+
+        if (existingBudget.isPresent()) {
+
+            expectedBudgetRepository.delete(
+                    existingBudget.get()
+            );
+
+            expectedBudgetRepository.flush();
+        }
+
+        return createExpectedBudget(
+                member,
+                targetMonth
         );
     }
 }
