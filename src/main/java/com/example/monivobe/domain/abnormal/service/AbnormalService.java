@@ -39,7 +39,7 @@ public class AbnormalService {
      * ============================================================
      * 회원의 이상 지출 조회
      *
-     * 이미 분석된 isAbnormal = true 거래만 조회
+     * isAbnormal = true 인 거래만 조회
      * ============================================================
      */
     public List<AbnormalResDTO.AbnormalSpendingResDTO> getAbnormal(
@@ -161,8 +161,11 @@ public class AbnormalService {
      * ============================================================
      * 새로운 거래 이상 지출 분석
      *
-     * 새로운 거래만 분석하지만
-     * 이상 여부 판단을 위해 기존 거래도 함께 참고한다.
+     * 새로운 거래를 분석한다.
+     *
+     * 중요:
+     * isAbnormal 값이 true/false/null인지와 관계없이
+     * 이상 지출 분석을 수행한다.
      * ============================================================
      */
     @Transactional
@@ -225,7 +228,9 @@ public class AbnormalService {
 
         /*
          * ========================================================
-         * 새로운 거래만 분석
+         * 새로운 거래 분석
+         *
+         * isAbnormal 값과 관계없이 분석
          * ========================================================
          */
 
@@ -240,19 +245,10 @@ public class AbnormalService {
 
 
             /*
-             * 이미 분석된 거래면 다시 분석하지 않음
-             */
-            if (
-                    transaction.getIsAbnormal() != null
-                            && transaction.getIsAbnormal()
-            ) {
-                continue;
-            }
-
-
-            /*
              * ====================================================
              * 이상 지출 분석
+             *
+             * isAbnormal이 false여도 분석한다.
              * ====================================================
              */
 
@@ -280,6 +276,8 @@ public class AbnormalService {
 
                 /*
                  * AbnormalTransaction 저장
+                 *
+                 * 기존 데이터가 있으면 갱신
                  */
                 saveAbnormalTransaction(
                         member,
@@ -290,8 +288,11 @@ public class AbnormalService {
             } else {
 
                 /*
+                 * =================================================
                  * 이상 지출 아님
+                 * =================================================
                  */
+
                 transaction.setIsAbnormal(false);
             }
         }
@@ -343,7 +344,8 @@ public class AbnormalService {
      * ============================================================
      * 이상 지출 DB 저장
      *
-     * 이미 등록된 거래라면 중복 저장하지 않는다.
+     * 이미 등록된 거래라면
+     * score / reason을 최신 분석 결과로 갱신한다.
      * ============================================================
      */
     private void saveAbnormalTransaction(
@@ -352,26 +354,32 @@ public class AbnormalService {
             AbnormalResDTO.AnalysisResult analysis
     ) {
 
-        boolean alreadyExists =
+        AbnormalTransaction abnormalTransaction =
                 abnormalTransactionRepository
                         .findByMemberAndTransaction(
                                 member,
                                 transaction
                         )
-                        .isPresent();
+                        .orElseGet(() ->
+                                new AbnormalTransaction(
+                                        member,
+                                        transaction,
+                                        analysis.reason(),
+                                        analysis.score()
+                                )
+                        );
 
-        if (alreadyExists) {
-            return;
-        }
 
+        /*
+         * 최신 분석 결과로 갱신
+         */
+        abnormalTransaction.setReason(
+                analysis.reason()
+        );
 
-        AbnormalTransaction abnormalTransaction =
-                new AbnormalTransaction(
-                        member,
-                        transaction,
-                        analysis.reason(),
-                        analysis.score()
-                );
+        abnormalTransaction.setScore(
+                analysis.score()
+        );
 
 
         abnormalTransactionRepository.save(
