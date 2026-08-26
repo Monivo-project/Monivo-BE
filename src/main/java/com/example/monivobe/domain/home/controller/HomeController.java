@@ -22,8 +22,6 @@ public class HomeController {
     private final HomeService homeService;
     private final ExpectedBudgetService expectedBudgetService;
 
-    private final TestService testService;
-
     // 대시보드 상단 요약
     // GET /api/home?year=2026&month=8
     @GetMapping
