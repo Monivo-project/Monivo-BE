@@ -11,4 +11,12 @@ public class TransactionResDTO {
         private String status;
         private String message;
     }
+
+    public record TransactionOntologyContext(
+            Long transactionId,
+            String merchantName,
+            String categoryName,
+            String parentCategoryName
+    ) {
+    }
 }

@@ -2,6 +2,7 @@ package com.example.monivobe.domain.transaction.repository;
 
 import com.example.monivobe.domain.member.entity.Member;
 import com.example.monivobe.domain.transaction.entity.Transaction;
+import com.example.monivobe.domain.transaction.enums.ClassificationType;
 import com.example.monivobe.domain.transaction.enums.Status;
 import com.example.monivobe.domain.transaction.enums.TransactionType;
 import org.springframework.data.domain.Page;
@@ -253,4 +254,11 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
     List<Transaction> findByMemberOrderByDateDesc(Member member);
 
     List<Transaction> findAllByIdIn(List<Long> ids);
+
+
+    // uncategorized
+    List<Transaction> findByMemberAndClassificationType(
+            Member member,
+            ClassificationType classificationType
+    );
 }
