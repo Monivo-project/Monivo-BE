@@ -24,7 +24,12 @@ public class HomeResDTO {
 
             Integer abnormalCount,
 
-            Integer uncategorizedCount
+            Integer uncategorizedCount,
+            // 지난달 같은 기간 대비 지출 차이
+            Integer changeFromLastMonth,
+
+            // 지난달 같은 기간 대비 지출 변화율
+            Double changeRateFromLastMonth
     ) {
     }
 
@@ -78,4 +83,29 @@ public class HomeResDTO {
             List<RecentTransaction> transactions
     ) {
     }
+
+    @Builder
+    public record ExpectedBudget (
+            // AI가 예측한 이번 달 예상 지출
+            Integer expectedAmount,
+            // 사용자가 예상 지출에 맞춰 사용할 것을 권장하는 예산
+            Integer recommendedBudget,
+            // 현재까지 이번 달 사용한 금액
+            Integer currentAmount,
+            // 이번 달 남은 예상 지출
+            Integer remainingExpectedAmount,
+            // 예측 근거
+            String reason,
+            // 신뢰도
+            Integer confidence,
+            // 기준이 된 개월 수
+            Integer analyzedMonths
+    ){}
+
+    @Builder
+    public record MonthlySpending (
+            String month,
+            Integer amount
+
+    ){}
 }

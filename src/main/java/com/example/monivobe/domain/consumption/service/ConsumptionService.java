@@ -6,9 +6,14 @@ import com.example.monivobe.domain.member.entity.Member;
 import com.example.monivobe.domain.transaction.entity.Category;
 import com.example.monivobe.domain.transaction.entity.Transaction;
 import com.example.monivobe.domain.transaction.enums.ClassificationType;
+import com.example.monivobe.domain.transaction.enums.TransactionType;
 import com.example.monivobe.domain.transaction.repository.CategoryRepository;
 import com.example.monivobe.domain.transaction.repository.TransactionRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
@@ -30,41 +35,64 @@ public class ConsumptionService {
     public ConsumptionResDTO.GetConsumption getConsumption(
             Integer year,
             Integer month,
+            int page,
+            int size,
             Member member
     ) {
 
         YearMonth yearMonth = YearMonth.of(year, month);
+        LocalDateTime startDate = yearMonth.atDay(1).atStartOfDay();
+        LocalDateTime endDate = yearMonth.plusMonths(1).atDay(1).atStartOfDay();
 
-        LocalDateTime startDate =
-                yearMonth.atDay(1).atStartOfDay();
+        // =========================
+        // Pageable
+        // =========================
 
-        LocalDateTime endDate =
-                yearMonth.plusMonths(1).atDay(1).atStartOfDay();
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "date"));
 
-
+        // =========================
         // 해당 월 거래 조회
-        List<Transaction> transactions =
+        // =========================
+
+        Page<Transaction> transactionPage =
                 transactionRepository
-                        .findByMemberAndDateGreaterThanEqualAndDateLessThanOrderByDateDesc(
+                        .findByMemberAndDateGreaterThanEqualAndDateLessThan(
                                 member,
                                 startDate,
-                                endDate
+                                endDate,
+                                pageable
                         );
 
 
+        // =========================
         // 총 지출
-        int totalAmount = transactions.stream()
-                .map(Transaction::getAmount)
-                .filter(amount -> amount != null)
-                .mapToInt(Integer::intValue)
-                .sum();
+        // =========================
+
+        // 주의:
+        // 현재 페이지의 거래가 아니라
+        // 해당 월 전체 지출을 계산해야 함
+        int totalAmount =
+                transactionRepository
+                        .sumAmountByMemberAndDateBetween(
+                                member,
+                                startDate,
+                                endDate,
+                                TransactionType.EXPENSE
+                        );
 
 
-        // 거래 수
-        int transactionCount = transactions.size();
+        // =========================
+        // 전체 거래 수
+        // =========================
+
+        long transactionCount =
+                transactionPage.getTotalElements();
 
 
+        // =========================
         // 이상 지출 수
+        // =========================
+
         long abnormalCount =
                 transactionRepository
                         .countByMemberAndDateGreaterThanEqualAndDateLessThanAndIsAbnormalTrue(
@@ -74,7 +102,10 @@ public class ConsumptionService {
                         );
 
 
+        // =========================
         // 미분류 수
+        // =========================
+
         long unclassifiedCount =
                 transactionRepository
                         .countByMemberAndDateGreaterThanEqualAndDateLessThanAndClassificationType(
@@ -85,20 +116,66 @@ public class ConsumptionService {
                         );
 
 
+        // =========================
+        // 현재 페이지 거래
+        // =========================
+
         List<ConsumptionResDTO.TransactionInfo> transactionList =
-                transactions.stream()
+                transactionPage
+                        .getContent()
+                        .stream()
                         .map(ConsumptionConverter::toTransactionInfo)
                         .toList();
 
 
+        // =========================
+        // Response
+        // =========================
+
         return ConsumptionResDTO.GetConsumption.builder()
                 .year(year)
                 .month(month)
+
                 .totalAmount(totalAmount)
-                .transactionCount(transactionCount)
-                .abnormalCount((int) abnormalCount)
-                .uncategorizedCount((int) unclassifiedCount)
+
+                .transactionCount(
+                        (int) transactionCount
+                )
+
+                .abnormalCount(
+                        (int) abnormalCount
+                )
+
+                .uncategorizedCount(
+                        (int) unclassifiedCount
+                )
+
                 .transactions(transactionList)
+
+                .page(
+                        transactionPage.getNumber()
+                )
+
+                .size(
+                        transactionPage.getSize()
+                )
+
+                .totalPages(
+                        transactionPage.getTotalPages()
+                )
+
+                .totalElements(
+                        transactionPage.getTotalElements()
+                )
+
+                .hasNext(
+                        transactionPage.hasNext()
+                )
+
+                .hasPrevious(
+                        transactionPage.hasPrevious()
+                )
+
                 .build();
     }
 

@@ -2,6 +2,9 @@ package com.example.monivobe.domain.transaction.repository;
 
 import com.example.monivobe.domain.member.entity.Member;
 import com.example.monivobe.domain.transaction.entity.Transaction;
+import com.example.monivobe.domain.transaction.enums.TransactionType;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -22,6 +25,14 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
     Optional<Transaction> findByIdAndMember(
             Long id,
             Member member
+    );
+
+    Page<Transaction>
+    findByMemberAndDateGreaterThanEqualAndDateLessThan(
+            Member member,
+            LocalDateTime startDate,
+            LocalDateTime endDate,
+            Pageable pageable
     );
 
     // 카테고리별 지출
@@ -85,12 +96,13 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
      * 특정 기간의 총 지출
      */
     @Query("""
-        SELECT COALESCE(SUM(t.amount), 0)
-        FROM Transaction t
-        WHERE t.member = :member
-          AND t.date >= :startDate
-          AND t.date < :endDate
-    """)
+    SELECT COALESCE(SUM(t.amount), 0)
+    FROM Transaction t
+    WHERE t.member = :member
+      AND t.date >= :startDate
+      AND t.date < :endDate
+      AND t.transactionType = com.example.monivobe.domain.transaction.enums.TransactionType.EXPENSE
+""")
     Integer getTotalExpense(
             @Param("member") Member member,
             @Param("startDate") LocalDateTime startDate,
@@ -120,13 +132,13 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
      * 미분류 거래 개수
      */
     @Query("""
-        SELECT COUNT(t)
-        FROM Transaction t
-        WHERE t.member = :member
-          AND t.date >= :startDate
-          AND t.date < :endDate
-          AND t.classificationType = com.example.monivobe.domain.transaction.enums.ClassificationType.UNCLASSIFIED
-    """)
+    SELECT COUNT(t)
+    FROM Transaction t
+    WHERE t.member = :member
+      AND t.date >= :startDate
+      AND t.date < :endDate
+      AND t.category IS NULL
+""")
     Integer countUnclassifiedTransactions(
             @Param("member") Member member,
             @Param("startDate") LocalDateTime startDate,
@@ -154,7 +166,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
     /**
      * 최근 거래 5건
      */
-    List<Transaction> findTop5ByMemberOrderByDateDesc(
+    List<Transaction> findTop3ByMemberOrderByDateDesc(
             Member member
     );
 
@@ -202,5 +214,29 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             @Param("member") Member member,
             @Param("startDate") LocalDateTime startDate,
             @Param("endDate") LocalDateTime endDate
+    );
+
+
+
+    // home
+    List<Transaction> findByMemberAndDateBetweenOrderByDateAsc(
+            Member member,
+            LocalDateTime start,
+            LocalDateTime end
+    );
+
+    @Query("""
+    SELECT COALESCE(SUM(t.amount), 0)
+    FROM Transaction t
+    WHERE t.member = :member
+      AND t.date >= :startDate
+      AND t.date < :endDate
+      AND t.transactionType = :transactionType
+""")
+    int sumAmountByMemberAndDateBetween(
+            @Param("member") Member member,
+            @Param("startDate") LocalDateTime startDate,
+            @Param("endDate") LocalDateTime endDate,
+            @Param("transactionType") TransactionType transactionType
     );
 }

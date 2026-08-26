@@ -17,7 +17,14 @@ public class ConsumptionResDTO {
             Integer transactionCount,
             Integer abnormalCount,
             Integer uncategorizedCount,
-            List<TransactionInfo> transactions
+            List<TransactionInfo> transactions,
+            // 페이지 정보
+            Integer page,
+            Integer size,
+            Integer totalPages,
+            Long totalElements,
+            Boolean hasNext,
+            Boolean hasPrevious
     ){}
 
     @Builder

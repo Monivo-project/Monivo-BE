@@ -2,17 +2,17 @@ package com.example.monivobe.domain.home.controller;
 
 import com.example.monivobe.domain.home.dto.HomeResDTO;
 import com.example.monivobe.domain.home.exception.code.HomeSuccessCode;
+import com.example.monivobe.domain.home.service.ExpectedBudgetService;
 import com.example.monivobe.domain.home.service.HomeService;
+import com.example.monivobe.domain.home.service.TestService;
 import com.example.monivobe.global.apiPayload.ApiResponse;
 import com.example.monivobe.global.security.entity.AuthMember;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
-
-import java.time.LocalDate;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+import java.io.IOException;
 
 @RestController
 @RequiredArgsConstructor
@@ -20,7 +20,9 @@ import java.time.LocalDate;
 public class HomeController {
 
     private final HomeService homeService;
+    private final ExpectedBudgetService expectedBudgetService;
 
+    private final TestService testService;
 
     // 대시보드 상단 요약
     // GET /api/home?year=2026&month=8
@@ -41,23 +43,6 @@ public class HomeController {
     }
 
 
-    // 이번 주 일별 지출
-    // GET /api/home/weekly?date=2026-08-25
-    @GetMapping("/weekly")
-    public ApiResponse<HomeResDTO.WeeklyExpense> getWeeklyExpense(
-            @RequestParam LocalDate date,
-            @AuthenticationPrincipal AuthMember authMember
-    ) {
-        return ApiResponse.onSuccess(
-                HomeSuccessCode.HOME_GET_SUCCESS,
-                homeService.getWeeklyExpense(
-                        date,
-                        authMember.getMember()
-                )
-        );
-    }
-
-
     // 최근 거래
     // GET /api/home/recent-transactions
     @GetMapping("/recent-transactions")
@@ -71,4 +56,49 @@ public class HomeController {
                 )
         );
     }
+
+    // 예상 지출
+    // GET /api/home/expected-budget
+    @GetMapping("/expected-budget")
+    public ApiResponse<HomeResDTO.ExpectedBudget> getExpectedBudget(
+            @AuthenticationPrincipal AuthMember authMember,
+            @RequestParam Integer year,
+            @RequestParam Integer month
+    ) {
+        return ApiResponse.onSuccess(
+                HomeSuccessCode.HOME_GET_SUCCESS,
+                expectedBudgetService.getExpectedBudget(
+                        authMember.getMember(),
+                        year,
+                        month
+                )
+        );
+    }
+
+    // 최근 6개월 지출
+    @GetMapping("/monthly-spending")
+    public ApiResponse<Object> getMonthlySpending(
+            @AuthenticationPrincipal AuthMember authMember
+    ) {
+        return ApiResponse.onSuccess(HomeSuccessCode.HOME_GET_SUCCESS, homeService.getMonthlySpending(authMember.getMember()));
+    }
+
+
+
+    // 테스트용
+    @PostMapping(
+            value = "/import",
+            consumes = "multipart/form-data"
+    )
+    public ResponseEntity<Void> importTransactions(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam Long memberId
+    ) throws IOException {
+
+        testService.importExcel(file, memberId);
+
+        return ResponseEntity.ok().build();
+    }
+
+
 }

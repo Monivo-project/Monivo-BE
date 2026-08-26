@@ -59,7 +59,6 @@ public class TransactionPromptService {
                 4. confidence가 0.7 미만이면 categoryId를 null로 반환하세요.
                 5. 거래처만으로 판단하기 어려운 경우 억지로 분류하지 마세요.
                 6. 애매한 거래는 사용자가 직접 확인할 수 있도록 해야 합니다.
-                7. reason에는 분류 근거를 간단하게 작성하세요.
 
                 반드시 JSON 형식으로 반환하세요.
                 """.formatted(
