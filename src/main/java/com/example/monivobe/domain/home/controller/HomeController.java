@@ -82,23 +82,4 @@ public class HomeController {
     ) {
         return ApiResponse.onSuccess(HomeSuccessCode.HOME_GET_SUCCESS, homeService.getMonthlySpending(authMember.getMember()));
     }
-
-
-
-    // 테스트용
-    @PostMapping(
-            value = "/import",
-            consumes = "multipart/form-data"
-    )
-    public ResponseEntity<Void> importTransactions(
-            @RequestParam("file") MultipartFile file,
-            @RequestParam Long memberId
-    ) throws IOException {
-
-        testService.importExcel(file, memberId);
-
-        return ResponseEntity.ok().build();
-    }
-
-
 }
