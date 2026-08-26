@@ -35,4 +35,6 @@ public class AbnormalController {
         BaseSuccessCode code = ConsumptionSuccessCode.CONSUMPTION_GET_SUCCESS;
         return ApiResponse.onSuccess(code,abnormalService.updateAbnormal(transactionId, authMember.getMember()));
     }
+
+
 }
