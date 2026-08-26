@@ -1,5 +1,6 @@
 package com.example.monivobe.domain.transaction.service;
 
+import com.example.monivobe.domain.transaction.dto.response.TransactionResDTO;
 import com.example.monivobe.domain.transaction.entity.Transaction;
 import lombok.RequiredArgsConstructor;
 import org.apache.jena.query.Dataset;
@@ -539,5 +540,155 @@ public class TransactionOntologyService {
                         "[^a-zA-Z0-9가-힣]",
                         "_"
                 );
+    }
+
+
+
+    public TransactionResDTO.TransactionOntologyContext getTransactionContext(
+            Long transactionId
+    ) {
+        if (transactionId == null) {
+            return null;
+        }
+
+        ontologyDataset.begin(ReadWrite.READ);
+
+        try {
+            Model model = ontologyDataset.getDefaultModel();
+
+            Resource transactionResource =
+                    model.createResource(
+                            NS + "Transaction_" + transactionId
+                    );
+
+            if (!model.contains(
+                    transactionResource,
+                    RDF.type,
+                    model.createResource(NS + "Transaction")
+            )) {
+                return null;
+            }
+
+            Property hasMerchant =
+                    model.createProperty(NS + "hasMerchant");
+
+            Property hasCategory =
+                    model.createProperty(NS + "hasCategory");
+
+            Resource merchantResource =
+                    model
+                            .listObjectsOfProperty(
+                                    transactionResource,
+                                    hasMerchant
+                            )
+                            .hasNext()
+                            ? model
+                            .listObjectsOfProperty(
+                                    transactionResource,
+                                    hasMerchant
+                            )
+                            .next()
+                            .asResource()
+                            : null;
+
+            Resource categoryResource =
+                    model
+                            .listObjectsOfProperty(
+                                    transactionResource,
+                                    hasCategory
+                            )
+                            .hasNext()
+                            ? model
+                            .listObjectsOfProperty(
+                                    transactionResource,
+                                    hasCategory
+                            )
+                            .next()
+                            .asResource()
+                            : null;
+
+            String merchantName =
+                    getLabel(
+                            model,
+                            merchantResource
+                    );
+
+            String categoryName =
+                    getLabel(
+                            model,
+                            categoryResource
+                    );
+
+            String parentCategoryName =
+                    getParentCategory(
+                            model,
+                            categoryResource
+                    );
+
+            return new TransactionResDTO.TransactionOntologyContext(
+                    transactionId,
+                    merchantName,
+                    categoryName,
+                    parentCategoryName
+            );
+
+        } finally {
+            ontologyDataset.end();
+        }
+    }
+
+    private String getLabel(
+            Model model,
+            Resource resource
+    ) {
+
+        if (resource == null) {
+            return null;
+        }
+
+        var statement =
+                model.getProperty(
+                        resource,
+                        org.apache.jena.vocabulary.RDFS.label
+                );
+
+        if (statement == null) {
+            return null;
+        }
+
+        return statement.getString();
+    }
+
+    private String getParentCategory(
+            Model model,
+            Resource categoryResource
+    ) {
+
+        if (categoryResource == null) {
+            return null;
+        }
+
+        Property belongsTo =
+                model.createProperty(
+                        NS + "belongsTo"
+                );
+
+        var iterator =
+                model.listObjectsOfProperty(
+                        categoryResource,
+                        belongsTo
+                );
+
+        if (!iterator.hasNext()) {
+            return null;
+        }
+
+        Resource parent =
+                iterator.next().asResource();
+
+        return getLabel(
+                model,
+                parent
+        );
     }
 }

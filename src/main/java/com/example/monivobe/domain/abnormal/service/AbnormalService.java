@@ -2,10 +2,12 @@ package com.example.monivobe.domain.abnormal.service;
 
 import com.example.monivobe.domain.abnormal.dto.AbnormalResDTO;
 import com.example.monivobe.domain.member.entity.Member;
+import com.example.monivobe.domain.transaction.dto.response.TransactionResDTO;
 import com.example.monivobe.domain.transaction.entity.AbnormalTransaction;
 import com.example.monivobe.domain.transaction.entity.Transaction;
 import com.example.monivobe.domain.transaction.repository.AbnormalTransactionRepository;
 import com.example.monivobe.domain.transaction.repository.TransactionRepository;
+import com.example.monivobe.domain.transaction.service.TransactionOntologyService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -13,7 +15,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -23,14 +27,19 @@ public class AbnormalService {
     private final TransactionRepository transactionRepository;
     private final AbnormalTransactionRepository abnormalTransactionRepository;
 
+    /*
+     * ============================================================
+     * Ontology
+     * ============================================================
+     */
+    private final TransactionOntologyService transactionOntologyService;
+
 
     /**
      * ============================================================
      * 회원의 이상 지출 조회
      *
-     * 페이지 조회 시에는 "분석"하지 않고
-     * 이미 분석된 isAbnormal = true 거래만 조회하는 것을
-     * 권장합니다.
+     * 이미 분석된 isAbnormal = true 거래만 조회
      * ============================================================
      */
     public List<AbnormalResDTO.AbnormalSpendingResDTO> getAbnormal(
@@ -46,14 +55,14 @@ public class AbnormalService {
         for (Transaction transaction : transactions) {
 
             /*
-             * 지출만 사용
+             * 지출만 조회
              */
             if (!isExpense(transaction)) {
                 continue;
             }
 
             /*
-             * 이미 이상 지출로 판정된 거래만 조회
+             * 이상 지출로 판정된 거래만 조회
              */
             if (!Boolean.TRUE.equals(
                     transaction.getIsAbnormal()
@@ -62,7 +71,7 @@ public class AbnormalService {
             }
 
             /*
-             * 저장되어 있는 이상 지출 정보 조회
+             * 저장된 이상 지출 정보
              */
             AbnormalTransaction abnormalTransaction =
                     abnormalTransactionRepository
@@ -72,12 +81,40 @@ public class AbnormalService {
                             )
                             .orElse(null);
 
-            /*
-             * 이상 지출 정보가 없다면 넘어감
-             */
             if (abnormalTransaction == null) {
                 continue;
             }
+
+            /*
+             * ====================================================
+             * Ontology Context
+             *
+             * DB Category
+             *     식비
+             *
+             * Ontology Category
+             *     카페
+             *
+             * Parent Category
+             *     식비
+             * ====================================================
+             */
+            TransactionResDTO.TransactionOntologyContext ontologyContext =
+                    transactionOntologyService.getTransactionContext(
+                            transaction.getId()
+                    );
+
+            /*
+             * 화면에 보여줄 카테고리
+             *
+             * 소분류가 존재하면 소분류를 우선 사용
+             * 없으면 DB Category 사용
+             */
+            String categoryName =
+                    getDisplayCategory(
+                            transaction,
+                            ontologyContext
+                    );
 
             result.add(
                     AbnormalResDTO.AbnormalSpendingResDTO.builder()
@@ -91,9 +128,7 @@ public class AbnormalService {
                                     transaction.getAmount()
                             )
                             .category(
-                                    transaction.getCategory() != null
-                                            ? transaction.getCategory().getName()
-                                            : "미분류"
+                                    categoryName
                             )
                             .date(
                                     transaction.getDate()
@@ -124,15 +159,9 @@ public class AbnormalService {
 
     /**
      * ============================================================
-     * 새로운 거래만 이상 지출 분석
+     * 새로운 거래 이상 지출 분석
      *
-     * TransactionProcessingService에서
-     *
-     * List<Transaction> newTransactions
-     *
-     * 를 받아서 처리한다.
-     *
-     * 새 거래만 분석하지만,
+     * 새로운 거래만 분석하지만
      * 이상 여부 판단을 위해 기존 거래도 함께 참고한다.
      * ============================================================
      */
@@ -142,7 +171,7 @@ public class AbnormalService {
     ) {
 
         /*
-         * 새로운 거래가 없으면 아무것도 하지 않음
+         * 새로운 거래가 없으면 종료
          */
         if (
                 newTransactions == null
@@ -154,9 +183,7 @@ public class AbnormalService {
 
         /*
          * ========================================================
-         * 회원 조회
-         *
-         * 새 거래의 member를 기준으로 전체 거래를 가져온다.
+         * 회원
          * ========================================================
          */
 
@@ -168,15 +195,32 @@ public class AbnormalService {
 
         /*
          * ========================================================
-         * 기존 거래 + 새로운 거래
+         * 전체 거래 조회
          *
-         * 이상 여부 판단을 위해 전체 거래를 가져온다.
+         * 기존 거래 + 새로운 거래
          * ========================================================
          */
 
         List<Transaction> allTransactions =
                 transactionRepository
                         .findByMemberOrderByDateDesc(member);
+
+
+        /*
+         * ========================================================
+         * Ontology Context 미리 조회
+         *
+         * transactionId → Ontology Context
+         *
+         * 반복적인 Ontology 조회를 방지
+         * ========================================================
+         */
+
+        Map<Long, TransactionResDTO.TransactionOntologyContext>
+                ontologyContexts =
+                loadOntologyContexts(
+                        allTransactions
+                );
 
 
         /*
@@ -188,7 +232,7 @@ public class AbnormalService {
         for (Transaction transaction : newTransactions) {
 
             /*
-             * 지출이 아니면 이상 지출 분석하지 않음
+             * 지출이 아니면 분석하지 않음
              */
             if (!isExpense(transaction)) {
                 continue;
@@ -196,7 +240,7 @@ public class AbnormalService {
 
 
             /*
-             * 이미 분석된 거래라면 다시 분석하지 않음
+             * 이미 분석된 거래면 다시 분석하지 않음
              */
             if (
                     transaction.getIsAbnormal() != null
@@ -207,12 +251,16 @@ public class AbnormalService {
 
 
             /*
+             * ====================================================
              * 이상 지출 분석
+             * ====================================================
              */
+
             AbnormalResDTO.AnalysisResult analysis =
                     analyzeTransaction(
                             transaction,
-                            allTransactions
+                            allTransactions,
+                            ontologyContexts
                     );
 
 
@@ -225,7 +273,7 @@ public class AbnormalService {
             if (analysis.score() >= 60) {
 
                 /*
-                 * Transaction 이상 지출 여부 변경
+                 * Transaction 이상 지출 여부
                  */
                 transaction.setIsAbnormal(true);
 
@@ -242,11 +290,52 @@ public class AbnormalService {
             } else {
 
                 /*
-                 * 이상 지출이 아니면 false
+                 * 이상 지출 아님
                  */
                 transaction.setIsAbnormal(false);
             }
         }
+    }
+
+
+    /**
+     * ============================================================
+     * Ontology Context 일괄 조회
+     * ============================================================
+     */
+    private Map<Long, TransactionResDTO.TransactionOntologyContext>
+    loadOntologyContexts(
+            List<Transaction> transactions
+    ) {
+
+        Map<Long, TransactionResDTO.TransactionOntologyContext>
+                contexts =
+                new HashMap<>();
+
+        for (Transaction transaction : transactions) {
+
+            if (
+                    transaction == null
+                            || transaction.getId() == null
+            ) {
+                continue;
+            }
+
+            TransactionResDTO.TransactionOntologyContext context =
+                    transactionOntologyService.getTransactionContext(
+                            transaction.getId()
+                    );
+
+            if (context != null) {
+
+                contexts.put(
+                        transaction.getId(),
+                        context
+                );
+            }
+        }
+
+        return contexts;
     }
 
 
@@ -297,7 +386,9 @@ public class AbnormalService {
 
     private AbnormalResDTO.AnalysisResult analyzeTransaction(
             Transaction transaction,
-            List<Transaction> allTransactions
+            List<Transaction> allTransactions,
+            Map<Long, TransactionResDTO.TransactionOntologyContext>
+                    ontologyContexts
     ) {
 
         int score = 0;
@@ -309,14 +400,31 @@ public class AbnormalService {
         /*
          * ========================================================
          * 1. 고액 지출
+         *
+         * 온톨로지 소분류 기준 평균 금액을 우선 사용
          * ========================================================
          */
 
         double averageAmount =
-                calculateAverageAmount(
+                calculateOntologyAverageAmount(
                         transaction,
-                        allTransactions
+                        allTransactions,
+                        ontologyContexts
                 );
+
+
+        /*
+         * 온톨로지 기준 평균을 계산할 수 없으면
+         * 기존 DB Category 기준으로 fallback
+         */
+        if (averageAmount <= 0) {
+
+            averageAmount =
+                    calculateAverageAmount(
+                            transaction,
+                            allTransactions
+                    );
+        }
 
 
         if (averageAmount > 0) {
@@ -332,7 +440,7 @@ public class AbnormalService {
 
                 reasons.add(
                         String.format(
-                                "평소 평균 지출보다 약 %.1f배 높은 금액입니다.",
+                                "평소 동일 소비 유형의 평균 지출보다 약 %.1f배 높은 금액입니다.",
                                 ratio
                         )
                 );
@@ -343,7 +451,7 @@ public class AbnormalService {
 
                 reasons.add(
                         String.format(
-                                "평소 평균 지출보다 약 %.1f배 높은 금액입니다.",
+                                "평소 동일 소비 유형의 평균 지출보다 약 %.1f배 높은 금액입니다.",
                                 ratio
                         )
                 );
@@ -354,7 +462,7 @@ public class AbnormalService {
 
                 reasons.add(
                         String.format(
-                                "평소 평균 지출보다 약 %.1f배 높은 금액입니다.",
+                                "평소 동일 소비 유형의 평균 지출보다 약 %.1f배 높은 금액입니다.",
                                 ratio
                         )
                 );
@@ -406,22 +514,55 @@ public class AbnormalService {
 
         /*
          * ========================================================
-         * 4. 새로운 카테고리
+         * 4. 온톨로지 기반 새로운 소비 유형
+         *
+         * DB에서는
+         *
+         * 식비
+         *
+         * 로 동일하지만
+         *
+         * Ontology에서는
+         *
+         * 카페
+         * 배달
+         * 외식
+         *
+         * 으로 구분한다.
          * ========================================================
          */
 
         if (
-                isNewCategory(
+                isNewOntologyCategory(
                         transaction,
-                        allTransactions
+                        allTransactions,
+                        ontologyContexts
                 )
         ) {
 
             score += 20;
 
-            reasons.add(
-                    "기존에 자주 이용하지 않던 소비 카테고리입니다."
-            );
+            String categoryName =
+                    getOntologyCategoryName(
+                            transaction,
+                            ontologyContexts
+                    );
+
+            if (categoryName != null) {
+
+                reasons.add(
+                        String.format(
+                                "기존에 이용하지 않던 새로운 소비 유형 '%s'에서 지출이 발생했습니다.",
+                                categoryName
+                        )
+                );
+
+            } else {
+
+                reasons.add(
+                        "기존에 이용하지 않던 새로운 소비 유형에서 지출이 발생했습니다."
+                );
+            }
         }
 
 
@@ -447,8 +588,11 @@ public class AbnormalService {
 
 
         /*
+         * ========================================================
          * 최대 100점
+         * ========================================================
          */
+
         score =
                 Math.min(
                         score,
@@ -473,7 +617,120 @@ public class AbnormalService {
 
 
     // ============================================================
-    // 평균 지출 금액
+    // 온톨로지 기반 평균 지출
+    // ============================================================
+
+    private double calculateOntologyAverageAmount(
+            Transaction target,
+            List<Transaction> transactions,
+            Map<Long, TransactionResDTO.TransactionOntologyContext>
+                    ontologyContexts
+    ) {
+
+        /*
+         * 대상 거래의 Ontology 정보
+         */
+        TransactionResDTO.TransactionOntologyContext targetContext =
+                ontologyContexts.get(
+                        target.getId()
+                );
+
+
+        /*
+         * 온톨로지 정보가 없으면 fallback
+         */
+        if (
+                targetContext == null
+                        || targetContext.categoryName() == null
+        ) {
+            return 0;
+        }
+
+
+        String targetCategory =
+                targetContext.categoryName();
+
+
+        List<Transaction> previousTransactions =
+                transactions.stream()
+
+                        /*
+                         * 자기 자신 제외
+                         */
+                        .filter(t ->
+                                !t.getId()
+                                        .equals(
+                                                target.getId()
+                                        )
+                        )
+
+                        /*
+                         * 금액 존재
+                         */
+                        .filter(t ->
+                                t.getAmount() != null
+                        )
+
+                        /*
+                         * 날짜 존재
+                         */
+                        .filter(t ->
+                                t.getDate() != null
+                        )
+
+                        /*
+                         * 과거 거래만
+                         */
+                        .filter(t ->
+                                t.getDate()
+                                        .isBefore(
+                                                target.getDate()
+                                        )
+                        )
+
+                        /*
+                         * 온톨로지 소분류가 동일한 거래만
+                         */
+                        .filter(t -> {
+
+                            TransactionResDTO.TransactionOntologyContext
+                                    context =
+                                    ontologyContexts.get(
+                                            t.getId()
+                                    );
+
+                            return context != null
+                                    && context.categoryName() != null
+                                    && context.categoryName()
+                                    .equals(
+                                            targetCategory
+                                    );
+                        })
+
+                        .toList();
+
+
+        if (
+                previousTransactions.isEmpty()
+        ) {
+            return 0;
+        }
+
+
+        return previousTransactions.stream()
+
+                .mapToInt(
+                        Transaction::getAmount
+                )
+
+                .average()
+
+                .orElse(0);
+    }
+
+
+    // ============================================================
+    // 기존 DB Category 기준 평균
     // ============================================================
 
     private double calculateAverageAmount(
@@ -543,6 +800,105 @@ public class AbnormalService {
                 .average()
 
                 .orElse(0);
+    }
+
+
+    // ============================================================
+    // 온톨로지 기반 새로운 소비 유형
+    // ============================================================
+
+    private boolean isNewOntologyCategory(
+            Transaction target,
+            List<Transaction> transactions,
+            Map<Long, TransactionResDTO.TransactionOntologyContext>
+                    ontologyContexts
+    ) {
+
+        TransactionResDTO.TransactionOntologyContext targetContext =
+                ontologyContexts.get(
+                        target.getId()
+                );
+
+
+        /*
+         * 온톨로지 정보가 없으면
+         * 판단하지 않는다.
+         */
+        if (
+                targetContext == null
+                        || targetContext.categoryName() == null
+        ) {
+            return false;
+        }
+
+
+        String targetCategory =
+                targetContext.categoryName();
+
+
+        /*
+         * 과거에 동일한 소분류를 사용한 적이 있는지 확인
+         */
+        return transactions.stream()
+
+                .filter(t ->
+                        !t.getId()
+                                .equals(
+                                        target.getId()
+                                )
+                )
+
+                .filter(t ->
+                        t.getDate() != null
+                )
+
+                .filter(t ->
+                        t.getDate()
+                                .isBefore(
+                                        target.getDate()
+                                )
+                )
+
+                .map(t ->
+                        ontologyContexts.get(
+                                t.getId()
+                        )
+                )
+
+                .filter(context ->
+                        context != null
+                                && context.categoryName() != null
+                )
+
+                .noneMatch(context ->
+                        context.categoryName()
+                                .equals(
+                                        targetCategory
+                                )
+                );
+    }
+
+
+    // ============================================================
+    // 온톨로지 소비 유형 이름
+    // ============================================================
+
+    private String getOntologyCategoryName(
+            Transaction transaction,
+            Map<Long, TransactionResDTO.TransactionOntologyContext>
+                    ontologyContexts
+    ) {
+
+        TransactionResDTO.TransactionOntologyContext context =
+                ontologyContexts.get(
+                        transaction.getId()
+                );
+
+        if (context == null) {
+            return null;
+        }
+
+        return context.categoryName();
     }
 
 
@@ -617,6 +973,9 @@ public class AbnormalService {
         }
 
 
+        /*
+         * 10,000원 초과는 소액 결제로 보지 않음
+         */
         if (
                 target.getAmount() > 10000
         ) {
@@ -683,7 +1042,7 @@ public class AbnormalService {
 
 
     // ============================================================
-    // 새로운 카테고리
+    // 기존 DB 기준 새로운 카테고리
     // ============================================================
 
     private boolean isNewCategory(
@@ -821,5 +1180,50 @@ public class AbnormalService {
          * Transaction ID 반환
          */
         return transaction.getId();
+    }
+
+
+    // ============================================================
+    // 화면에 보여줄 카테고리
+    // ============================================================
+
+    private String getDisplayCategory(
+            Transaction transaction,
+            TransactionResDTO.TransactionOntologyContext context
+    ) {
+
+        /*
+         * Ontology 소분류가 존재하면 소분류 사용
+         *
+         * 예:
+         * 카페
+         * 배달
+         * 외식
+         */
+        if (
+                context != null
+                        && context.categoryName() != null
+                        && !context.categoryName().isBlank()
+        ) {
+
+            return context.categoryName();
+        }
+
+
+        /*
+         * Ontology 정보가 없으면
+         * 기존 DB Category 사용
+         */
+        if (
+                transaction.getCategory() != null
+        ) {
+
+            return transaction
+                    .getCategory()
+                    .getName();
+        }
+
+
+        return "미분류";
     }
 }

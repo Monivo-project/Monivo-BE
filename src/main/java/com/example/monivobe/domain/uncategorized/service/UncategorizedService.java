@@ -38,24 +38,29 @@ public class UncategorizedService {
                         );
 
         return transactions.stream()
-                .filter(transaction ->
-                        transaction.getCandidateCategory() != null
-                )
-                .map(transaction ->
-                        UncategorizedResDTO.GetUncategorized.builder()
-                                .transactionId(transaction.getId())
-                                .merchant(transaction.getMerchant())
-                                .candidateCategoryId(
-                                        transaction.getCandidateCategory().getId()
-                                )
-                                .candidateCategoryName(
-                                        transaction.getCandidateCategory().getName()
-                                )
-                                .date(transaction.getDate().toLocalDate())
-                                .amount(transaction.getAmount())
-                                .confidence(transaction.getConfidence())
-                                .build()
-                )
+                .map(transaction -> {
+
+                    Long candidateCategoryId = null;
+                    String candidateCategoryName = null;
+
+                    if (transaction.getCandidateCategory() != null) {
+                        candidateCategoryId =
+                                transaction.getCandidateCategory().getId();
+
+                        candidateCategoryName =
+                                transaction.getCandidateCategory().getName();
+                    }
+
+                    return UncategorizedResDTO.GetUncategorized.builder()
+                            .transactionId(transaction.getId())
+                            .merchant(transaction.getMerchant())
+                            .candidateCategoryId(candidateCategoryId)
+                            .candidateCategoryName(candidateCategoryName)
+                            .date(transaction.getDate().toLocalDate())
+                            .amount(transaction.getAmount())
+                            .confidence(transaction.getConfidence())
+                            .build();
+                })
                 .toList();
     }
 }
