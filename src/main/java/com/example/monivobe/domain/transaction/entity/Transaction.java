@@ -41,7 +41,7 @@ public class Transaction {
 
     private LocalDateTime date;
 
-    private Boolean confidence;
+    private Double confidence;
 
     private Boolean isAbnormal;
 
@@ -52,6 +52,10 @@ public class Transaction {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "merchant_id")
     private Merchant merchantInfo;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "candidate_category_id")
+    private Category candidateCategory;
 
     public Transaction(
             Member member,
@@ -70,7 +74,7 @@ public class Transaction {
                 ClassificationType.UNCLASSIFIED;
 
         this.isAbnormal = false;
-        this.confidence = false;
+        this.confidence = null;
     }
 
     public void setCategory(Category category) {

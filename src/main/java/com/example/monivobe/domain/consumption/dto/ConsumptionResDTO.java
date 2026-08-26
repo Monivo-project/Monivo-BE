@@ -64,7 +64,7 @@ public class ConsumptionResDTO {
             String categoryName,
             ClassificationType classificationType,
             Boolean isAbnormal,
-            Boolean confidence
+            Double confidence
     ){}
 
     @Builder
