@@ -31,7 +31,6 @@ public class TransactionAiService {
             transactionOntologyService;
 
 
-    @Transactional
     public void classifyUnclassifiedTransactions(
             List<Transaction> transactions
     ) {
