@@ -10,9 +10,11 @@ import com.example.monivobe.domain.transaction.enums.TransactionType;
 import com.example.monivobe.domain.transaction.repository.CategoryKeywordRepository;
 import com.example.monivobe.domain.transaction.repository.TransactionRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.LocalDateTime;
@@ -22,39 +24,29 @@ import java.util.List;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class TransactionImportService {
 
     private final TransactionRepository transactionRepository;
-
     private final MemberRepository memberRepository;
-
     private final CategoryKeywordRepository categoryKeywordRepository;
-
     private final FileStorageService fileStorageService;
-
-    private final MerchantService merchantService;
-
 
     /**
      * ============================================================
      * 1단계
      *
-     * Excel 파싱
-     *      ↓
+     * Excel
+     *   ↓
      * Transaction 생성
-     *      ↓
+     *   ↓
+     * Keyword 분류
+     *   ↓
      * DB 저장
-     *      ↓
+     *   ↓
      * COMMIT
      *
-     * 이 메서드에서는
-     *
-     * - LLM 분류 X
-     * - 이상 지출 X
-     * - 예상 지출 X
-     * - 정기결제 X
-     *
-     * 오직 거래내역 저장만 담당한다.
+     * 여기서는 LLM 호출하지 않는다.
      * ============================================================
      */
     @Transactional
@@ -63,11 +55,8 @@ public class TransactionImportService {
             String fileKey
     ) {
 
-        /*
-         * ========================================================
-         * 회원 조회
-         * ========================================================
-         */
+        log.info("========== Transaction Import 시작 ==========");
+        log.info("memberId={}, fileKey={}", memberId, fileKey);
 
         Member member =
                 memberRepository.findById(memberId)
@@ -77,33 +66,25 @@ public class TransactionImportService {
                                 )
                         );
 
-
         try (
                 InputStream inputStream =
                         fileStorageService.download(fileKey)
         ) {
 
             /*
-             * ====================================================
              * CategoryKeyword 조회
-             *
-             * 현재 단계에서는
-             * 기본적인 카테고리 분류까지만 수행한다.
-             *
-             * LLM 분류는 다음 단계에서 수행한다.
-             * ====================================================
              */
-
             List<CategoryKeyword> keywords =
                     categoryKeywordRepository.findAll();
 
+            log.info(
+                    "CategoryKeyword 조회 완료 - count={}",
+                    keywords.size()
+            );
 
             /*
-             * ====================================================
              * Excel 파싱
-             * ====================================================
              */
-
             List<Transaction> transactions =
                     parseExcel(
                             inputStream,
@@ -111,75 +92,47 @@ public class TransactionImportService {
                             keywords
                     );
 
-
             /*
-             * ====================================================
-             * 거래내역이 없는 경우
-             * ====================================================
+             * 거래내역 없음
              */
-
             if (transactions.isEmpty()) {
+
+                log.warn(
+                        "import할 거래내역이 없습니다."
+                );
 
                 return List.of();
             }
 
-
             /*
-             * ====================================================
-             * Transaction 저장
-             * ====================================================
+             * DB 저장
              */
-
             List<Transaction> savedTransactions =
                     transactionRepository.saveAll(
                             transactions
                     );
 
-
             /*
-             * ====================================================
-             * 즉시 INSERT 실행
-             *
-             * 실제 COMMIT은 메서드가 정상적으로 종료될 때
-             * 발생한다.
-             * ====================================================
+             * INSERT 즉시 실행
              */
-
             transactionRepository.flush();
 
-
-            System.out.println(
-                    "[TRANSACTION IMPORT] "
-                            + savedTransactions.size()
-                            + "건 거래내역 저장 완료"
+            log.info(
+                    "Transaction 저장 완료 - count={}",
+                    savedTransactions.size()
             );
 
-
-            /*
-             * ====================================================
-             * 여기까지 정상적으로 실행되고 메서드가 종료되면
-             *
-             * @Transactional
-             *      ↓
-             * COMMIT
-             *
-             * 된다.
-             * ====================================================
-             */
+            log.info("========== Transaction Import 완료 ==========");
 
             return savedTransactions;
 
-
         } catch (IOException e) {
 
-            /*
-             * ====================================================
-             * S3 파일 읽기 실패
-             *
-             * RuntimeException으로 변경해서
-             * 현재 트랜잭션을 rollback시킨다.
-             * ====================================================
-             */
+            log.error(
+                    "S3 파일 읽기 실패 - fileKey={}",
+                    fileKey,
+                    e
+            );
 
             throw new IllegalArgumentException(
                     "S3 파일을 읽는 중 오류가 발생했습니다.",
@@ -192,6 +145,15 @@ public class TransactionImportService {
     /**
      * ============================================================
      * Excel → Transaction
+     *
+     * TestService에서 정상적으로 동작하던
+     * Excel 구조를 그대로 사용한다.
+     *
+     * index 0 = 날짜
+     * index 1 = 거래 유형
+     * index 2 = 거래처
+     * index 3 = 입금
+     * index 4 = 지출
      * ============================================================
      */
     private List<Transaction> parseExcel(
@@ -203,7 +165,6 @@ public class TransactionImportService {
         List<Transaction> transactions =
                 new ArrayList<>();
 
-
         try (
                 Workbook workbook =
                         WorkbookFactory.create(
@@ -214,20 +175,16 @@ public class TransactionImportService {
             Sheet sheet =
                     workbook.getSheetAt(0);
 
+            log.info(
+                    "Excel sheet={}, lastRow={}",
+                    sheet.getSheetName(),
+                    sheet.getLastRowNum()
+            );
 
             /*
-             * ====================================================
-             * 6번째 행부터 데이터
-             *
-             * Excel
-             *
-             * 0 → 1번째 행
-             * 1 → 2번째 행
-             * ...
-             * 5 → 6번째 행
-             * ====================================================
+             * 실제 거래 데이터는 6번째 행부터
+             * index = 5
              */
-
             for (
                     int i = 5;
                     i <= sheet.getLastRowNum();
@@ -237,62 +194,19 @@ public class TransactionImportService {
                 Row row =
                         sheet.getRow(i);
 
-
                 if (row == null) {
                     continue;
                 }
 
-
                 /*
-                 * ====================================================
-                 * 금액 컬럼
-                 *
-                 * index 3 → 입금
-                 * index 4 → 지출
-                 * ====================================================
-                 */
-
-                Cell incomeCell =
-                        row.getCell(3);
-
-                Cell expenseCell =
-                        row.getCell(4);
-
-
-                /*
-                 * ====================================================
-                 * SUM 등의 수식이 들어간 행은
-                 * 거래내역이 아니므로 제외
-                 * ====================================================
-                 */
-
-                if (
-                        (incomeCell != null
-                                && incomeCell.getCellType()
-                                == CellType.FORMULA)
-
-                                ||
-
-                                (expenseCell != null
-                                        && expenseCell.getCellType()
-                                        == CellType.FORMULA)
-                ) {
-
-                    continue;
-                }
-
-
-                /*
-                 * ====================================================
+                 * ==================================================
                  * 날짜
-                 * ====================================================
+                 * ==================================================
                  */
-
                 LocalDateTime date =
                         getDate(
                                 row.getCell(0)
                         );
-
 
                 if (date == null) {
                     continue;
@@ -300,105 +214,131 @@ public class TransactionImportService {
 
 
                 /*
-                 * ====================================================
-                 * 입금 / 지출 금액
-                 * ====================================================
+                 * ==================================================
+                 * 거래 유형
+                 *
+                 * TestService에서 정상 작동하던 방식 그대로
+                 *
+                 * index 1
+                 * ==================================================
                  */
-
-                Integer incomeAmount =
-                        getInteger(
-                                incomeCell
+                String transactionTypeValue =
+                        getString(
+                                row.getCell(1)
                         );
-
-                Integer expenseAmount =
-                        getInteger(
-                                expenseCell
-                        );
-
 
                 TransactionType transactionType;
 
-                Integer amount;
-
-
-                /*
-                 * ====================================================
-                 * 입출금 판별
-                 *
-                 * 현재 네가 사용하고 있는 Excel 구조 기준
-                 *
-                 * 입금 컬럼 = 4열
-                 * 지출 컬럼 = 5열
-                 *
-                 * 4열이 0이면
-                 *      → INCOME
-                 *      → 5열 금액 사용
-                 *
-                 * 그 외
-                 *      → EXPENSE
-                 *      → 4열 금액 사용
-                 * ====================================================
-                 */
-
-                if (
-                        incomeAmount != null
-                                && incomeAmount == 0
-                ) {
+                if ("입금".equals(transactionTypeValue)) {
 
                     transactionType =
                             TransactionType.INCOME;
-
-                    amount =
-                            expenseAmount;
 
                 } else {
 
                     transactionType =
                             TransactionType.EXPENSE;
-
-                    amount =
-                            incomeAmount;
                 }
 
 
                 /*
-                 * ====================================================
-                 * 금액이 없는 행 제외
-                 * ====================================================
-                 */
-
-                if (amount == null) {
-                    continue;
-                }
-
-
-                /*
-                 * ====================================================
+                 * ==================================================
                  * 거래처
-                 * ====================================================
+                 * ==================================================
                  */
-
                 String merchant =
                         getString(
                                 row.getCell(2)
                         );
-
 
                 if (
                         merchant == null
                                 || merchant.isBlank()
                 ) {
 
+                    log.warn(
+                            "거래처명이 없는 거래 - row={}",
+                            i
+                    );
+
                     continue;
                 }
 
 
                 /*
-                 * ====================================================
-                 * Transaction 생성
-                 * ====================================================
+                 * ==================================================
+                 * 금액
+                 *
+                 * TestService에서 정상 작동하던
+                 * 지출 금액 컬럼 = index 4
+                 * ==================================================
                  */
+                Cell amountCell =
+                        row.getCell(4);
 
+
+                /*
+                 * SUM 등의 수식 행 제외
+                 */
+                if (
+                        amountCell != null
+                                && amountCell.getCellType()
+                                == CellType.FORMULA
+                ) {
+
+                    log.debug(
+                            "합계 행 제외 - row={}",
+                            i
+                    );
+
+                    continue;
+                }
+
+
+                Integer amount =
+                        getInteger(
+                                amountCell
+                        );
+
+
+                if (amount == null) {
+
+                    /*
+                     * 입금 거래의 경우
+                     * 실제 Excel 구조에서
+                     * 금액이 index 3에 있을 수도 있으므로
+                     * 입금은 index 3도 확인한다.
+                     */
+                    if (
+                            transactionType
+                                    == TransactionType.INCOME
+                    ) {
+
+                        amount =
+                                getInteger(
+                                        row.getCell(3)
+                                );
+                    }
+                }
+
+
+                if (amount == null) {
+
+                    log.warn(
+                            "금액이 없는 거래 - row={}, merchant={}",
+                            i,
+                            merchant
+                    );
+
+                    continue;
+                }
+
+
+                /*
+                 * ==================================================
+                 * Transaction 생성
+                 * ==================================================
+                 */
                 Transaction transaction =
                         new Transaction(
                                 member,
@@ -410,23 +350,8 @@ public class TransactionImportService {
 
 
                 /*
-                 * ====================================================
-                 * Merchant 저장
-                 *
-                 * 네이버 / 카카오 API를 이용한
-                 * 상세 가게 정보 처리는 다음 단계에서 한다.
-                 *
-                 * 현재는 기존 Merchant 검색/생성만 수행한다.
-                 * ====================================================
-                 */
-
-
-
-                /*
-                 * ====================================================
-                 * 기본 Keyword 분류
-                 *
-                 * 이 단계에서는 LLM을 호출하지 않는다.
+                 * ==================================================
+                 * Keyword 기반 Category 분류
                  *
                  * EXPENSE
                  *      ↓
@@ -438,9 +363,8 @@ public class TransactionImportService {
                  * INCOME
                  *      ↓
                  * UNCLASSIFIED
-                 * ====================================================
+                 * ==================================================
                  */
-
                 if (
                         transactionType
                                 == TransactionType.EXPENSE
@@ -452,7 +376,6 @@ public class TransactionImportService {
                                     keywords
                             );
 
-
                     if (category != null) {
 
                         transaction.setCategory(
@@ -463,10 +386,21 @@ public class TransactionImportService {
                                 ClassificationType.KEYWORD
                         );
 
+                        log.info(
+                                "Keyword 분류 성공 - merchant={}, category={}",
+                                merchant,
+                                category.getName()
+                        );
+
                     } else {
 
                         transaction.setClassificationType(
                                 ClassificationType.UNCONFIRMED
+                        );
+
+                        log.info(
+                                "Keyword 분류 실패 → LLM 대상 - merchant={}",
+                                merchant
                         );
                     }
 
@@ -479,18 +413,17 @@ public class TransactionImportService {
 
 
                 /*
-                 * ====================================================
+                 * ==================================================
                  * 로그
-                 * ====================================================
+                 * ==================================================
                  */
-
-                System.out.println(
-                        "[TRANSACTION] "
-                                + "merchant=" + merchant
-                                + ", amount=" + amount
-                                + ", type=" + transactionType
-                                + ", classification="
-                                + transaction.getClassificationType()
+                log.info(
+                        "[TRANSACTION] row={}, merchant={}, amount={}, type={}, classification={}",
+                        i,
+                        merchant,
+                        amount,
+                        transactionType,
+                        transaction.getClassificationType()
                 );
 
 
@@ -500,14 +433,13 @@ public class TransactionImportService {
             }
         }
 
-
         return transactions;
     }
 
 
     /**
      * ============================================================
-     * 날짜 파싱
+     * 날짜
      * ============================================================
      */
     private LocalDateTime getDate(
@@ -523,15 +455,9 @@ public class TransactionImportService {
             return null;
         }
 
-
         /*
          * 문자열 날짜
-         *
-         * 예:
-         * 2026.07.31 21:52:48
-         * ============================================================
          */
-
         if (
                 cell.getCellType()
                         == CellType.STRING
@@ -541,11 +467,9 @@ public class TransactionImportService {
                     cell.getStringCellValue()
                             .trim();
 
-
             if (value.isEmpty()) {
                 return null;
             }
-
 
             return LocalDateTime.parse(
                     value,
@@ -555,13 +479,9 @@ public class TransactionImportService {
             );
         }
 
-
         /*
-         * ====================================================
          * Excel 날짜
-         * ====================================================
          */
-
         if (
                 cell.getCellType()
                         == CellType.NUMERIC
@@ -572,7 +492,6 @@ public class TransactionImportService {
 
             return cell.getLocalDateTimeCellValue();
         }
-
 
         throw new IllegalArgumentException(
                 "날짜 형식이 올바르지 않습니다. value="
@@ -585,7 +504,7 @@ public class TransactionImportService {
 
     /**
      * ============================================================
-     * 금액 파싱
+     * 금액
      * ============================================================
      */
     private Integer getInteger(
@@ -596,31 +515,19 @@ public class TransactionImportService {
             return null;
         }
 
-
         DataFormatter formatter =
                 new DataFormatter();
-
 
         String value =
                 formatter
                         .formatCellValue(cell)
                         .trim();
 
-
         if (value.isEmpty()) {
             return null;
         }
 
-
         try {
-
-            /*
-             * 콤마 제거
-             *
-             * 100,000
-             *      ↓
-             * 100000
-             */
 
             value =
                     value.replace(
@@ -628,16 +535,12 @@ public class TransactionImportService {
                             ""
                     );
 
-
             return (int)
                     Double.parseDouble(
                             value
                     );
 
-
-        } catch (
-                NumberFormatException e
-        ) {
+        } catch (NumberFormatException e) {
 
             throw new IllegalArgumentException(
                     "금액 형식이 올바르지 않습니다: "
@@ -650,7 +553,7 @@ public class TransactionImportService {
 
     /**
      * ============================================================
-     * 문자열 파싱
+     * 문자열
      * ============================================================
      */
     private String getString(
@@ -660,7 +563,6 @@ public class TransactionImportService {
         if (cell == null) {
             return null;
         }
-
 
         return cell
                 .toString()
@@ -686,7 +588,6 @@ public class TransactionImportService {
             return null;
         }
 
-
         for (
                 CategoryKeyword categoryKeyword
                 : keywords
@@ -695,20 +596,22 @@ public class TransactionImportService {
             String keyword =
                     categoryKeyword.getKeyword();
 
+            if (
+                    keyword == null
+                            || keyword.isBlank()
+            ) {
+
+                continue;
+            }
 
             if (
-                    keyword != null
-                            && !keyword.isBlank()
-                            && merchant.contains(
-                            keyword
-                    )
+                    merchant.contains(keyword)
             ) {
 
                 return categoryKeyword
                         .getCategory();
             }
         }
-
 
         return null;
     }
