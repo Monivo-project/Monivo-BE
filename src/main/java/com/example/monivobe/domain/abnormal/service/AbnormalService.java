@@ -237,6 +237,11 @@ public class AbnormalService {
                  */
 
                 transaction.setIsAbnormal(false);
+
+                /*
+                 * Transaction DB 저장
+                 */
+                transactionRepository.save(transaction);
             }
         }
     }

@@ -32,6 +32,7 @@ public class TransactionImportService {
     private final CategoryKeywordRepository categoryKeywordRepository;
     private final FileStorageService fileStorageService;
 
+
     /**
      * ============================================================
      * 1단계
@@ -42,11 +43,18 @@ public class TransactionImportService {
      *   ↓
      * Keyword 분류
      *   ↓
-     * DB 저장
+     * 중복 검사
      *   ↓
-     * COMMIT
+     * DB 저장
      *
-     * 여기서는 LLM 호출하지 않는다.
+     * 중복 기준
+     *
+     * 회원
+     * + 가맹점
+     * + 금액
+     * + 날짜
+     *
+     * transactionType은 중복 검사에서 제외
      * ============================================================
      */
     @Transactional
@@ -55,8 +63,22 @@ public class TransactionImportService {
             String fileKey
     ) {
 
-        log.info("========== Transaction Import 시작 ==========");
-        log.info("memberId={}, fileKey={}", memberId, fileKey);
+        log.info(
+                "========== Transaction Import 시작 =========="
+        );
+
+        log.info(
+                "memberId={}, fileKey={}",
+                memberId,
+                fileKey
+        );
+
+
+        /*
+         * ========================================================
+         * 회원 조회
+         * ========================================================
+         */
 
         Member member =
                 memberRepository.findById(memberId)
@@ -66,14 +88,19 @@ public class TransactionImportService {
                                 )
                         );
 
+
         try (
                 InputStream inputStream =
                         fileStorageService.download(fileKey)
         ) {
 
+
             /*
+             * ====================================================
              * CategoryKeyword 조회
+             * ====================================================
              */
+
             List<CategoryKeyword> keywords =
                     categoryKeywordRepository.findAll();
 
@@ -82,9 +109,13 @@ public class TransactionImportService {
                     keywords.size()
             );
 
+
             /*
+             * ====================================================
              * Excel 파싱
+             * ====================================================
              */
+
             List<Transaction> transactions =
                     parseExcel(
                             inputStream,
@@ -92,9 +123,13 @@ public class TransactionImportService {
                             keywords
                     );
 
+
             /*
+             * ====================================================
              * 거래내역 없음
+             * ====================================================
              */
+
             if (transactions.isEmpty()) {
 
                 log.warn(
@@ -104,27 +139,165 @@ public class TransactionImportService {
                 return List.of();
             }
 
+
             /*
-             * DB 저장
+             * ====================================================
+             * 중복 거래 제거
+             * ====================================================
              */
+
+            List<Transaction> newTransactions =
+                    new ArrayList<>();
+
+
+            for (Transaction transaction : transactions) {
+
+
+                /*
+                 * =================================================
+                 * DB에 이미 존재하는 거래인지 확인
+                 *
+                 * 기준:
+                 *
+                 * member
+                 * merchant
+                 * amount
+                 * date
+                 *
+                 * transactionType은 사용하지 않음
+                 * =================================================
+                 */
+
+                boolean duplicated =
+                        transactionRepository
+                                .existsByMemberAndMerchantAndAmountAndDate(
+                                        member,
+                                        transaction.getMerchant(),
+                                        transaction.getAmount(),
+                                        transaction.getDate()
+                                );
+
+
+                /*
+                 * =================================================
+                 * DB에 이미 존재
+                 * =================================================
+                 */
+
+                if (duplicated) {
+
+                    log.info(
+                            "중복 거래 제외 - merchant={}, amount={}, date={}, type={}",
+                            transaction.getMerchant(),
+                            transaction.getAmount(),
+                            transaction.getDate(),
+                            transaction.getTransactionType()
+                    );
+
+                    continue;
+                }
+
+
+                /*
+                 * =================================================
+                 * 현재 Excel 파일 내부에서 중복인지 확인
+                 *
+                 * 같은 파일에 동일한 거래가 여러 번 들어있는
+                 * 경우에도 한 번만 저장
+                 * =================================================
+                 */
+
+                boolean duplicatedInCurrentFile =
+                        newTransactions.stream()
+                                .anyMatch(existing ->
+                                        isSameTransaction(
+                                                existing,
+                                                transaction
+                                        )
+                                );
+
+
+                if (duplicatedInCurrentFile) {
+
+                    log.info(
+                            "Excel 내부 중복 거래 제외 - merchant={}, amount={}, date={}, type={}",
+                            transaction.getMerchant(),
+                            transaction.getAmount(),
+                            transaction.getDate(),
+                            transaction.getTransactionType()
+                    );
+
+                    continue;
+                }
+
+
+                /*
+                 * =================================================
+                 * 신규 거래 목록에 추가
+                 * =================================================
+                 */
+
+                newTransactions.add(
+                        transaction
+                );
+            }
+
+
+            /*
+             * ====================================================
+             * 저장할 거래가 없는 경우
+             * ====================================================
+             */
+
+            if (newTransactions.isEmpty()) {
+
+                log.info(
+                        "새로운 거래가 없습니다. 모든 거래가 중복입니다."
+                );
+
+                return List.of();
+            }
+
+
+            /*
+             * ====================================================
+             * DB 저장
+             * ====================================================
+             */
+
             List<Transaction> savedTransactions =
                     transactionRepository.saveAll(
-                            transactions
+                            newTransactions
                     );
+
 
             /*
              * INSERT 즉시 실행
              */
+
             transactionRepository.flush();
+
 
             log.info(
                     "Transaction 저장 완료 - count={}",
                     savedTransactions.size()
             );
 
-            log.info("========== Transaction Import 완료 ==========");
+
+            log.info(
+                    "중복 제외 전={}, 실제 저장={}",
+                    transactions.size(),
+                    savedTransactions.size()
+            );
+
+
+            log.info(
+                    "========== Transaction Import 완료 =========="
+            );
+
 
             return savedTransactions;
+
 
         } catch (IOException e) {
 
@@ -144,10 +317,70 @@ public class TransactionImportService {
 
     /**
      * ============================================================
-     * Excel → Transaction
+     * 거래 동일 여부
      *
-     * TestService에서 정상적으로 동작하던
-     * Excel 구조를 그대로 사용한다.
+     * Excel 내부 중복 검사
+     *
+     * 기준:
+     *
+     * merchant
+     * + amount
+     * + date
+     *
+     * transactionType은 검사하지 않음
+     * ============================================================
+     */
+    private boolean isSameTransaction(
+            Transaction first,
+            Transaction second
+    ) {
+
+        if (
+                first == null
+                        || second == null
+        ) {
+
+            return false;
+        }
+
+
+        return equals(
+                first.getMerchant(),
+                second.getMerchant()
+        )
+                && equals(
+                first.getAmount(),
+                second.getAmount()
+        )
+                && equals(
+                first.getDate(),
+                second.getDate()
+        );
+    }
+
+
+    /**
+     * ============================================================
+     * 안전한 equals
+     * ============================================================
+     */
+    private boolean equals(
+            Object first,
+            Object second
+    ) {
+
+        if (first == null) {
+
+            return second == null;
+        }
+
+        return first.equals(second);
+    }
+
+
+    /**
+     * ============================================================
+     * Excel → Transaction
      *
      * index 0 = 날짜
      * index 1 = 거래 유형
@@ -165,6 +398,7 @@ public class TransactionImportService {
         List<Transaction> transactions =
                 new ArrayList<>();
 
+
         try (
                 Workbook workbook =
                         WorkbookFactory.create(
@@ -175,16 +409,19 @@ public class TransactionImportService {
             Sheet sheet =
                     workbook.getSheetAt(0);
 
+
             log.info(
                     "Excel sheet={}, lastRow={}",
                     sheet.getSheetName(),
                     sheet.getLastRowNum()
             );
 
+
             /*
              * 실제 거래 데이터는 6번째 행부터
              * index = 5
              */
+
             for (
                     int i = 5;
                     i <= sheet.getLastRowNum();
@@ -194,21 +431,27 @@ public class TransactionImportService {
                 Row row =
                         sheet.getRow(i);
 
+
                 if (row == null) {
+
                     continue;
                 }
+
 
                 /*
                  * ==================================================
                  * 날짜
                  * ==================================================
                  */
+
                 LocalDateTime date =
                         getDate(
                                 row.getCell(0)
                         );
 
+
                 if (date == null) {
+
                     continue;
                 }
 
@@ -216,20 +459,21 @@ public class TransactionImportService {
                 /*
                  * ==================================================
                  * 거래 유형
-                 *
-                 * TestService에서 정상 작동하던 방식 그대로
-                 *
-                 * index 1
                  * ==================================================
                  */
+
                 String transactionTypeValue =
                         getString(
                                 row.getCell(1)
                         );
 
+
                 TransactionType transactionType;
 
-                if ("입금".equals(transactionTypeValue)) {
+
+                if ("입금".equals(
+                        transactionTypeValue
+                )) {
 
                     transactionType =
                             TransactionType.INCOME;
@@ -246,10 +490,12 @@ public class TransactionImportService {
                  * 거래처
                  * ==================================================
                  */
+
                 String merchant =
                         getString(
                                 row.getCell(2)
                         );
+
 
                 if (
                         merchant == null
@@ -268,11 +514,9 @@ public class TransactionImportService {
                 /*
                  * ==================================================
                  * 금액
-                 *
-                 * TestService에서 정상 작동하던
-                 * 지출 금액 컬럼 = index 4
                  * ==================================================
                  */
+
                 Cell amountCell =
                         row.getCell(4);
 
@@ -280,6 +524,7 @@ public class TransactionImportService {
                 /*
                  * SUM 등의 수식 행 제외
                  */
+
                 if (
                         amountCell != null
                                 && amountCell.getCellType()
@@ -301,24 +546,21 @@ public class TransactionImportService {
                         );
 
 
-                if (amount == null) {
+                /*
+                 * 입금 거래의 경우
+                 * index 3 확인
+                 */
 
-                    /*
-                     * 입금 거래의 경우
-                     * 실제 Excel 구조에서
-                     * 금액이 index 3에 있을 수도 있으므로
-                     * 입금은 index 3도 확인한다.
-                     */
-                    if (
-                            transactionType
-                                    == TransactionType.INCOME
-                    ) {
+                if (
+                        amount == null
+                                && transactionType
+                                == TransactionType.INCOME
+                ) {
 
-                        amount =
-                                getInteger(
-                                        row.getCell(3)
-                                );
-                    }
+                    amount =
+                            getInteger(
+                                    row.getCell(3)
+                            );
                 }
 
 
@@ -339,6 +581,7 @@ public class TransactionImportService {
                  * Transaction 생성
                  * ==================================================
                  */
+
                 Transaction transaction =
                         new Transaction(
                                 member,
@@ -365,6 +608,7 @@ public class TransactionImportService {
                  * UNCLASSIFIED
                  * ==================================================
                  */
+
                 if (
                         transactionType
                                 == TransactionType.EXPENSE
@@ -376,15 +620,18 @@ public class TransactionImportService {
                                     keywords
                             );
 
+
                     if (category != null) {
 
                         transaction.setCategory(
                                 category
                         );
 
+
                         transaction.setClassificationType(
                                 ClassificationType.KEYWORD
                         );
+
 
                         log.info(
                                 "Keyword 분류 성공 - merchant={}, category={}",
@@ -397,6 +644,7 @@ public class TransactionImportService {
                         transaction.setClassificationType(
                                 ClassificationType.UNCONFIRMED
                         );
+
 
                         log.info(
                                 "Keyword 분류 실패 → LLM 대상 - merchant={}",
@@ -417,6 +665,7 @@ public class TransactionImportService {
                  * 로그
                  * ==================================================
                  */
+
                 log.info(
                         "[TRANSACTION] row={}, merchant={}, amount={}, type={}, classification={}",
                         i,
@@ -432,6 +681,7 @@ public class TransactionImportService {
                 );
             }
         }
+
 
         return transactions;
     }
@@ -455,9 +705,11 @@ public class TransactionImportService {
             return null;
         }
 
+
         /*
          * 문자열 날짜
          */
+
         if (
                 cell.getCellType()
                         == CellType.STRING
@@ -467,9 +719,12 @@ public class TransactionImportService {
                     cell.getStringCellValue()
                             .trim();
 
+
             if (value.isEmpty()) {
+
                 return null;
             }
+
 
             return LocalDateTime.parse(
                     value,
@@ -479,9 +734,11 @@ public class TransactionImportService {
             );
         }
 
+
         /*
          * Excel 날짜
          */
+
         if (
                 cell.getCellType()
                         == CellType.NUMERIC
@@ -492,6 +749,7 @@ public class TransactionImportService {
 
             return cell.getLocalDateTimeCellValue();
         }
+
 
         throw new IllegalArgumentException(
                 "날짜 형식이 올바르지 않습니다. value="
@@ -512,20 +770,26 @@ public class TransactionImportService {
     ) {
 
         if (cell == null) {
+
             return null;
         }
 
+
         DataFormatter formatter =
                 new DataFormatter();
+
 
         String value =
                 formatter
                         .formatCellValue(cell)
                         .trim();
 
+
         if (value.isEmpty()) {
+
             return null;
         }
+
 
         try {
 
@@ -534,6 +798,7 @@ public class TransactionImportService {
                             ",",
                             ""
                     );
+
 
             return (int)
                     Double.parseDouble(
@@ -561,8 +826,10 @@ public class TransactionImportService {
     ) {
 
         if (cell == null) {
+
             return null;
         }
+
 
         return cell
                 .toString()
@@ -588,6 +855,7 @@ public class TransactionImportService {
             return null;
         }
 
+
         for (
                 CategoryKeyword categoryKeyword
                 : keywords
@@ -595,6 +863,7 @@ public class TransactionImportService {
 
             String keyword =
                     categoryKeyword.getKeyword();
+
 
             if (
                     keyword == null
@@ -604,6 +873,7 @@ public class TransactionImportService {
                 continue;
             }
 
+
             if (
                     merchant.contains(keyword)
             ) {
@@ -612,6 +882,7 @@ public class TransactionImportService {
                         .getCategory();
             }
         }
+
 
         return null;
     }
