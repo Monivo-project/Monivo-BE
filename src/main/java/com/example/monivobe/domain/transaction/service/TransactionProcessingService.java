@@ -7,6 +7,7 @@ import com.example.monivobe.domain.member.repository.MemberRepository;
 import com.example.monivobe.domain.settings.service.SettingsService;
 import com.example.monivobe.domain.transaction.entity.Transaction;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.YearMonth;
@@ -14,6 +15,7 @@ import java.util.List;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class TransactionProcessingService {
 
     private final TransactionImportService transactionImportService;
@@ -37,71 +39,39 @@ public class TransactionProcessingService {
      * ============================================================
      * 거래내역 전체 처리
      * ============================================================
-     *
-     * 파일 업로드
-     *      ↓
-     * [트랜잭션 1]
-     * Excel 파싱 + 거래내역 저장
-     *      ↓
-     * COMMIT
-     *
-     *      ↓
-     *
-     * [트랜잭션 2]
-     * Merchant 처리 + LLM 분류
-     *      ↓
-     * COMMIT
-     *
-     *      ↓
-     *
-     * [트랜잭션 3]
-     * 예상 지출 생성
-     *      ↓
-     * COMMIT
-     *
-     *      ↓
-     *
-     * [트랜잭션 4]
-     * 이상 지출 분석
-     *      ↓
-     * COMMIT
-     *
-     *      ↓
-     *
-     * [트랜잭션 5]
-     * 정기결제 분석
-     *      ↓
-     * PENDING Subscription 생성
-     *      ↓
-     * COMMIT
-     * ============================================================
      */
     public List<Long> process(
             Long memberId,
             String fileKey
     ) {
 
+        log.info("==================================================");
+        log.info("거래내역 전체 처리 시작");
+        log.info("memberId={}, fileKey={}", memberId, fileKey);
+        log.info("==================================================");
+
+
         /*
          * ========================================================
          * 1단계
-         *
-         * Excel 파싱
-         *      ↓
-         * Transaction 생성
-         *      ↓
-         * Keyword 분류
-         *      ↓
-         * DB 저장
-         *      ↓
-         * COMMIT
+         * Excel → Transaction 저장
          * ========================================================
          */
+
+        log.info("[1단계] 거래내역 import 시작");
 
         List<Transaction> transactions =
                 transactionImportService.importTransactions(
                         memberId,
                         fileKey
                 );
+
+        log.info(
+                "[1단계] 거래내역 import 완료 - count={}",
+                transactions == null
+                        ? 0
+                        : transactions.size()
+        );
 
 
         /*
@@ -114,6 +84,11 @@ public class TransactionProcessingService {
                 transactions == null
                         || transactions.isEmpty()
         ) {
+
+            log.info(
+                    "새롭게 저장된 거래내역이 없습니다."
+            );
+
             return List.of();
         }
 
@@ -129,22 +104,35 @@ public class TransactionProcessingService {
                         .map(Transaction::getId)
                         .toList();
 
+        log.info(
+                "처리 대상 Transaction IDs={}",
+                transactionIds
+        );
+
 
         /*
          * ========================================================
          * 2단계
-         *
-         * Merchant 처리
-         * +
-         * LLM 분류
-         *
-         * TransactionClassificationService 내부의
-         * @Transactional에서 처리
+         * Merchant + Keyword + LLM 분류
          * ========================================================
          */
 
+        log.info(
+                "=================================================="
+        );
+
+        log.info(
+                "[2단계] 거래 분류 시작"
+        );
+
+
         transactionClassificationService.classify(
                 transactionIds
+        );
+
+
+        log.info(
+                "[2단계] 거래 분류 완료"
         );
 
 
@@ -153,6 +141,12 @@ public class TransactionProcessingService {
          * Member 조회
          * ========================================================
          */
+
+        log.info(
+                "Member 조회 시작 - memberId={}",
+                memberId
+        );
+
 
         Member member =
                 memberRepository.findById(memberId)
@@ -164,15 +158,27 @@ public class TransactionProcessingService {
                         );
 
 
+        log.info(
+                "Member 조회 완료 - memberId={}",
+                memberId
+        );
+
+
         /*
          * ========================================================
          * 3단계
-         *
          * 예상 지출 생성
-         *
-         * 현재 월의 예상 지출이 없을 경우에만 생성
          * ========================================================
          */
+
+        log.info(
+                "=================================================="
+        );
+
+        log.info(
+                "[3단계] 예상 지출 생성 시작"
+        );
+
 
         expectedBudgetService.createExpectedBudgetIfNotExists(
                 member,
@@ -180,63 +186,87 @@ public class TransactionProcessingService {
         );
 
 
+        log.info(
+                "[3단계] 예상 지출 생성 완료"
+        );
+
+
         /*
          * ========================================================
          * 4단계
-         *
          * 이상 지출 분석
-         *
-         * 새롭게 업로드된 거래만 분석
-         *
-         * 이상 여부 판단을 위해
-         * AbnormalService 내부에서 기존 거래도 조회
          * ========================================================
          */
+
+        log.info(
+                "=================================================="
+        );
+
+        log.info(
+                "[4단계] 이상 지출 분석 시작"
+        );
+
 
         abnormalService.analyzeNewTransactions(
                 transactions
         );
 
 
+        log.info(
+                "[4단계] 이상 지출 분석 완료"
+        );
+
+
         /*
          * ========================================================
          * 5단계
-         *
          * 정기결제 분석
-         *
-         * SettingsService의 getCandidates()에서
-         *
-         * 1. 전체 거래 조회
-         * 2. 가맹점별 거래 그룹화
-         * 3. 2회 이상 거래 확인
-         * 4. 결제 간격 계산
-         * 5. MONTHLY / YEARLY 판단
-         * 6. PENDING Subscription 생성
-         * 7. SubscriptionTransaction 생성
-         *
-         * 까지 처리한다.
-         *
-         * SettingsService.getCandidates()는
-         * @Transactional이므로 별도의 트랜잭션으로 실행된다.
          * ========================================================
          */
+
+        log.info(
+                "=================================================="
+        );
+
+        log.info(
+                "[5단계] 정기결제 분석 시작"
+        );
+
 
         settingsService.getCandidates(
                 member
         );
 
 
+        log.info(
+                "[5단계] 정기결제 분석 완료"
+        );
+
+
         /*
          * ========================================================
-         * 모든 자동 처리 완료
-         *
-         * 1. 거래내역 저장
-         * 2. Merchant + LLM 분류
-         * 3. 예상 지출
-         * 4. 이상 지출
-         * 5. 정기결제 후보
+         * 전체 완료
          * ========================================================
          */
+
+        log.info(
+                "=================================================="
+        );
+
+        log.info(
+                "거래내역 전체 처리 완료"
+        );
+
+        log.info(
+                "memberId={}, transactionCount={}",
+                memberId,
+                transactionIds.size()
+        );
+
+        log.info(
+                "=================================================="
+        );
+
 
         return transactionIds;
     }
