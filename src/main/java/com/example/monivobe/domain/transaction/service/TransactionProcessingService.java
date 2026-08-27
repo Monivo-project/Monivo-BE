@@ -40,6 +40,7 @@ public class TransactionProcessingService {
      * 거래내역 전체 처리
      * ============================================================
      */
+     @Transactional
     public List<Long> process(
             Long memberId,
             String fileKey
