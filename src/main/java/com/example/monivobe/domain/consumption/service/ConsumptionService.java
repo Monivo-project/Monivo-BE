@@ -257,15 +257,25 @@ public class ConsumptionService {
     /**
      * 거래 검색
      */
+    /**
+     * 거래 검색
+     */
+    /**
+     * 거래 검색
+     */
     public ConsumptionResDTO.GetConsumption searchConsumption(
             Integer year,
             Integer month,
             String merchant,
             Long categoryId,
+            String classificationType,
+            int page,
+            int size,
             Member member
     ) {
 
-        YearMonth yearMonth = YearMonth.of(year, month);
+        YearMonth yearMonth =
+                YearMonth.of(year, month);
 
         LocalDateTime startDate =
                 yearMonth.atDay(1).atStartOfDay();
@@ -273,36 +283,91 @@ public class ConsumptionService {
         LocalDateTime endDate =
                 yearMonth.plusMonths(1).atDay(1).atStartOfDay();
 
+        // =========================
+        // Pageable
+        // =========================
 
-        List<Transaction> transactions =
+        Pageable pageable =
+                PageRequest.of(
+                        page,
+                        size,
+                        Sort.by(
+                                Sort.Direction.DESC,
+                                "date"
+                        )
+                );
+
+        // =========================
+        // 검색 + 페이징
+        // =========================
+
+        Page<Transaction> transactionPage =
                 transactionRepository.searchTransactions(
                         member,
                         startDate,
                         endDate,
                         merchant,
-                        categoryId
+                        categoryId,
+                        classificationType,
+                        pageable
                 );
 
+        // =========================
+        // 현재 검색 결과 전체 금액
+        // =========================
 
-        int totalAmount = transactions.stream()
-                .map(Transaction::getAmount)
-                .filter(amount -> amount != null)
-                .mapToInt(Integer::intValue)
-                .sum();
+        int totalAmount =
+                transactionPage
+                        .getContent()
+                        .stream()
+                        .map(Transaction::getAmount)
+                        .filter(amount -> amount != null)
+                        .mapToInt(Integer::intValue)
+                        .sum();
 
+        // =========================
+        // 거래 목록
+        // =========================
 
         List<ConsumptionResDTO.TransactionInfo> transactionList =
-                transactions.stream()
+                transactionPage
+                        .getContent()
+                        .stream()
                         .map(ConsumptionConverter::toTransactionInfo)
                         .toList();
 
+        // =========================
+        // Response
+        // =========================
 
         return ConsumptionResDTO.GetConsumption.builder()
                 .year(year)
                 .month(month)
                 .totalAmount(totalAmount)
-                .transactionCount(transactions.size())
+                .transactionCount(
+                        (int) transactionPage.getTotalElements()
+                )
                 .transactions(transactionList)
+
+                .page(
+                        transactionPage.getNumber()
+                )
+                .size(
+                        transactionPage.getSize()
+                )
+                .totalPages(
+                        transactionPage.getTotalPages()
+                )
+                .totalElements(
+                        transactionPage.getTotalElements()
+                )
+                .hasNext(
+                        transactionPage.hasNext()
+                )
+                .hasPrevious(
+                        transactionPage.hasPrevious()
+                )
+
                 .build();
     }
 
