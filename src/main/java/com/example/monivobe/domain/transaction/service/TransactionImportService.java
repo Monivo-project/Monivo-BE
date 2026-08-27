@@ -41,11 +41,41 @@ public class TransactionImportService {
      *   ↓
      * Transaction 생성
      *   ↓
+     * 거래 유형 판단
+     *   ↓
      * Keyword 분류
      *   ↓
      * 중복 검사
      *   ↓
      * DB 저장
+     *
+     * ============================================================
+     *
+     * Excel 구조
+     *
+     * index 0 = 날짜
+     * index 1 = 거래 유형
+     * index 2 = 거래처
+     * index 3 = 입금
+     * index 4 = 지출
+     *
+     * ============================================================
+     *
+     * 거래 유형 판단 기준
+     *
+     * 4열(index 3) != 0
+     *      → INCOME
+     *
+     * 5열(index 4) != 0
+     *      → EXPENSE
+     *
+     * 둘 다 0 또는 빈 값
+     *      → 거래 제외
+     *
+     * 둘 다 값이 존재
+     *      → 비정상 데이터이므로 거래 제외
+     *
+     * ============================================================
      *
      * 중복 기준
      *
@@ -204,6 +234,8 @@ public class TransactionImportService {
                  *
                  * 같은 파일에 동일한 거래가 여러 번 들어있는
                  * 경우에도 한 번만 저장
+                 *
+                 * transactionType은 검사하지 않음
                  * =================================================
                  */
 
@@ -382,11 +414,14 @@ public class TransactionImportService {
      * ============================================================
      * Excel → Transaction
      *
+     * Excel 구조
+     *
      * index 0 = 날짜
      * index 1 = 거래 유형
      * index 2 = 거래처
      * index 3 = 입금
      * index 4 = 지출
+     *
      * ============================================================
      */
     private List<Transaction> parseExcel(
@@ -458,35 +493,6 @@ public class TransactionImportService {
 
                 /*
                  * ==================================================
-                 * 거래 유형
-                 * ==================================================
-                 */
-
-                String transactionTypeValue =
-                        getString(
-                                row.getCell(1)
-                        );
-
-
-                TransactionType transactionType;
-
-
-                if ("입금".equals(
-                        transactionTypeValue
-                )) {
-
-                    transactionType =
-                            TransactionType.INCOME;
-
-                } else {
-
-                    transactionType =
-                            TransactionType.EXPENSE;
-                }
-
-
-                /*
-                 * ==================================================
                  * 거래처
                  * ==================================================
                  */
@@ -513,22 +519,37 @@ public class TransactionImportService {
 
                 /*
                  * ==================================================
-                 * 금액
+                 * 입금 / 지출 금액 확인
+                 *
+                 * index 3 = 입금
+                 * index 4 = 지출
                  * ==================================================
                  */
 
-                Cell amountCell =
+                Cell incomeCell =
+                        row.getCell(3);
+
+                Cell expenseCell =
                         row.getCell(4);
 
 
                 /*
+                 * ==================================================
                  * SUM 등의 수식 행 제외
+                 *
+                 * 입금 또는 지출 컬럼 중 하나라도
+                 * 수식이면 합계 행으로 판단
+                 * ==================================================
                  */
 
                 if (
-                        amountCell != null
-                                && amountCell.getCellType()
-                                == CellType.FORMULA
+                        (incomeCell != null
+                                && incomeCell.getCellType()
+                                == CellType.FORMULA)
+                                ||
+                                (expenseCell != null
+                                        && expenseCell.getCellType()
+                                        == CellType.FORMULA)
                 ) {
 
                     log.debug(
@@ -540,34 +561,128 @@ public class TransactionImportService {
                 }
 
 
-                Integer amount =
+                /*
+                 * ==================================================
+                 * 입금 금액
+                 * ==================================================
+                 */
+
+                Integer incomeAmount =
                         getInteger(
-                                amountCell
+                                incomeCell
                         );
 
 
                 /*
-                 * 입금 거래의 경우
-                 * index 3 확인
+                 * ==================================================
+                 * 지출 금액
+                 * ==================================================
+                 */
+
+                Integer expenseAmount =
+                        getInteger(
+                                expenseCell
+                        );
+
+
+                /*
+                 * ==================================================
+                 * 거래 유형 판단
+                 *
+                 * 4열 != 0 → INCOME
+                 * 5열 != 0 → EXPENSE
+                 * ==================================================
+                 */
+
+                TransactionType transactionType;
+
+                Integer amount;
+
+
+                /*
+                 * ==================================================
+                 * 둘 다 값이 있는 경우
+                 *
+                 * 일반적인 거래 데이터에서는 발생하면 안 됨
+                 * ==================================================
                  */
 
                 if (
-                        amount == null
-                                && transactionType
-                                == TransactionType.INCOME
+                        incomeAmount != null
+                                && incomeAmount != 0
+                                && expenseAmount != null
+                                && expenseAmount != 0
                 ) {
 
-                    amount =
-                            getInteger(
-                                    row.getCell(3)
-                            );
+                    log.warn(
+                            "입금과 지출 금액이 동시에 존재하는 비정상 거래 제외 - row={}, merchant={}, income={}, expense={}",
+                            i,
+                            merchant,
+                            incomeAmount,
+                            expenseAmount
+                    );
+
+                    continue;
                 }
 
 
-                if (amount == null) {
+                /*
+                 * ==================================================
+                 * INCOME
+                 *
+                 * 4열(index 3)이 0이 아닌 경우
+                 * ==================================================
+                 */
 
-                    log.warn(
-                            "금액이 없는 거래 - row={}, merchant={}",
+                if (
+                        incomeAmount != null
+                                && incomeAmount != 0
+                ) {
+
+                    transactionType =
+                            TransactionType.INCOME;
+
+                    amount =
+                            incomeAmount;
+
+                }
+
+
+                /*
+                 * ==================================================
+                 * EXPENSE
+                 *
+                 * 5열(index 4)이 0이 아닌 경우
+                 * ==================================================
+                 */
+
+                else if (
+                        expenseAmount != null
+                                && expenseAmount != 0
+                ) {
+
+                    transactionType =
+                            TransactionType.EXPENSE;
+
+                    amount =
+                            expenseAmount;
+
+                }
+
+
+                /*
+                 * ==================================================
+                 * 금액이 없는 행
+                 *
+                 * 입금 = 0
+                 * 지출 = 0
+                 * ==================================================
+                 */
+
+                else {
+
+                    log.debug(
+                            "입금/지출 금액이 없는 행 제외 - row={}, merchant={}",
                             i,
                             merchant
                     );
@@ -653,6 +768,11 @@ public class TransactionImportService {
                     }
 
                 } else {
+
+                    /*
+                     * INCOME은 소비 카테고리 분류 대상이 아니므로
+                     * UNCLASSIFIED 처리
+                     */
 
                     transaction.setClassificationType(
                             ClassificationType.UNCLASSIFIED
