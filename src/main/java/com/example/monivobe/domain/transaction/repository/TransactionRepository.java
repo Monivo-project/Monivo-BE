@@ -261,4 +261,11 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             Member member,
             ClassificationType classificationType
     );
+
+    boolean existsByMemberAndMerchantAndAmountAndDate(
+            Member member,
+            String merchant,
+            Integer amount,
+            LocalDateTime date
+    );
 }
