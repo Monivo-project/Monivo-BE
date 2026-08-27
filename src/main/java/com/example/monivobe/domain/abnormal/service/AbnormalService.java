@@ -241,7 +241,7 @@ public class AbnormalService {
                 /*
                  * Transaction DB 저장
                  */
-                transactionRepository.save(transaction);
+                // transactionRepository.save(transaction);
             }
         }
     }
