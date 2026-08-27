@@ -210,6 +210,12 @@ public class AbnormalService {
                  */
                 transaction.setIsAbnormal(true);
 
+                /*
+                 * Transaction DB 저장
+                 */
+                transactionRepository.save(transaction);
+
+
 
                 /*
                  * AbnormalTransaction 저장
