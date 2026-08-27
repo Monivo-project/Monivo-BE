@@ -35,9 +35,11 @@ public class TransactionImportService {
 
     /**
      * ============================================================
-     * 1단계
+     * 거래내역 Excel Import
      *
      * Excel
+     *   ↓
+     * Excel 파싱
      *   ↓
      * Transaction 생성
      *   ↓
@@ -45,29 +47,35 @@ public class TransactionImportService {
      *   ↓
      * Keyword 분류
      *   ↓
-     * 중복 검사
+     * DB 중복 검사
+     *   ↓
+     * Excel 내부 중복 검사
      *   ↓
      * DB 저장
+     * ============================================================
+     *
+     * 실제 Excel 구조
+     *
+     * index 0 = 거래일시
+     * index 1 = 적요
+     * index 2 = 보낸분/받는분
+     * index 3 = 송금메모
+     * index 4 = 미사용
+     * index 5 = 출금액
+     * index 6 = 입금액
+     * index 7 = 잔액
+     * index 8 = 거래점
+     * index 9 = 구분
      *
      * ============================================================
      *
-     * Excel 구조
+     * 거래 유형
      *
-     * index 0 = 날짜
-     * index 1 = 거래 유형
-     * index 2 = 거래처
-     * index 3 = 입금
-     * index 4 = 지출
-     *
-     * ============================================================
-     *
-     * 거래 유형 판단 기준
-     *
-     * 4열(index 3) != 0
-     *      → INCOME
-     *
-     * 5열(index 4) != 0
+     * 출금액 != 0
      *      → EXPENSE
+     *
+     * 입금액 != 0
+     *      → INCOME
      *
      * 둘 다 0 또는 빈 값
      *      → 거래 제외
@@ -77,12 +85,12 @@ public class TransactionImportService {
      *
      * ============================================================
      *
-     * 중복 기준
+     * DB 중복 기준
      *
-     * 회원
-     * + 가맹점
-     * + 금액
-     * + 날짜
+     * member
+     * + merchant
+     * + amount
+     * + date
      *
      * transactionType은 중복 검사에서 제외
      * ============================================================
@@ -114,7 +122,8 @@ public class TransactionImportService {
                 memberRepository.findById(memberId)
                         .orElseThrow(() ->
                                 new IllegalArgumentException(
-                                        "회원을 찾을 수 없습니다."
+                                        "회원을 찾을 수 없습니다. memberId="
+                                                + memberId
                                 )
                         );
 
@@ -123,7 +132,6 @@ public class TransactionImportService {
                 InputStream inputStream =
                         fileStorageService.download(fileKey)
         ) {
-
 
             /*
              * ====================================================
@@ -170,6 +178,12 @@ public class TransactionImportService {
             }
 
 
+            log.info(
+                    "Excel 파싱 완료 - parsedCount={}",
+                    transactions.size()
+            );
+
+
             /*
              * ====================================================
              * 중복 거래 제거
@@ -182,19 +196,14 @@ public class TransactionImportService {
 
             for (Transaction transaction : transactions) {
 
-
                 /*
                  * =================================================
-                 * DB에 이미 존재하는 거래인지 확인
-                 *
-                 * 기준:
+                 * DB 중복 검사
                  *
                  * member
                  * merchant
                  * amount
                  * date
-                 *
-                 * transactionType은 사용하지 않음
                  * =================================================
                  */
 
@@ -217,7 +226,7 @@ public class TransactionImportService {
                 if (duplicated) {
 
                     log.info(
-                            "중복 거래 제외 - merchant={}, amount={}, date={}, type={}",
+                            "DB 중복 거래 제외 - merchant={}, amount={}, date={}, type={}",
                             transaction.getMerchant(),
                             transaction.getAmount(),
                             transaction.getDate(),
@@ -230,10 +239,10 @@ public class TransactionImportService {
 
                 /*
                  * =================================================
-                 * 현재 Excel 파일 내부에서 중복인지 확인
+                 * 현재 Excel 파일 내부 중복 검사
                  *
                  * 같은 파일에 동일한 거래가 여러 번 들어있는
-                 * 경우에도 한 번만 저장
+                 * 경우 한 번만 저장
                  *
                  * transactionType은 검사하지 않음
                  * =================================================
@@ -305,6 +314,7 @@ public class TransactionImportService {
 
             /*
              * INSERT 즉시 실행
+             * ====================================================
              */
 
             transactionRepository.flush();
@@ -317,7 +327,7 @@ public class TransactionImportService {
 
 
             log.info(
-                    "중복 제외 전={}, 실제 저장={}",
+                    "파싱된 거래={}, 실제 저장={}",
                     transactions.size(),
                     savedTransactions.size()
             );
@@ -414,13 +424,18 @@ public class TransactionImportService {
      * ============================================================
      * Excel → Transaction
      *
-     * Excel 구조
+     * 실제 Excel 구조
      *
-     * index 0 = 날짜
-     * index 1 = 거래 유형
-     * index 2 = 거래처
-     * index 3 = 입금
-     * index 4 = 지출
+     * index 0 = 거래일시
+     * index 1 = 적요
+     * index 2 = 보낸분/받는분
+     * index 3 = 송금메모
+     * index 4 = 미사용
+     * index 5 = 출금액
+     * index 6 = 입금액
+     * index 7 = 잔액
+     * index 8 = 거래점
+     * index 9 = 구분
      *
      * ============================================================
      */
@@ -453,8 +468,16 @@ public class TransactionImportService {
 
 
             /*
+             * ====================================================
              * 실제 거래 데이터는 6번째 행부터
-             * index = 5
+             *
+             * Excel 화면 기준:
+             *
+             * 1번째 행 → index 0
+             * ...
+             * 6번째 행 → index 5
+             *
+             * ====================================================
              */
 
             for (
@@ -467,7 +490,18 @@ public class TransactionImportService {
                         sheet.getRow(i);
 
 
+                /*
+                 * ==================================================
+                 * 빈 행
+                 * ==================================================
+                 */
+
                 if (row == null) {
+
+                    log.debug(
+                            "빈 행 제외 - row={}",
+                            i
+                    );
 
                     continue;
                 }
@@ -476,6 +510,8 @@ public class TransactionImportService {
                 /*
                  * ==================================================
                  * 날짜
+                 *
+                 * index 0 = 거래일시
                  * ==================================================
                  */
 
@@ -487,6 +523,11 @@ public class TransactionImportService {
 
                 if (date == null) {
 
+                    log.debug(
+                            "날짜가 없는 행 제외 - row={}",
+                            i
+                    );
+
                     continue;
                 }
 
@@ -494,6 +535,17 @@ public class TransactionImportService {
                 /*
                  * ==================================================
                  * 거래처
+                 *
+                 * index 2 = 보낸분/받는분
+                 *
+                 * 현재 Excel에서
+                 *
+                 * 체크카드 → 적요에 가맹점
+                 *
+                 * 스마트출금 → 보낸분/받는분에 이름
+                 *
+                 * 형태가 섞일 수 있으므로
+                 * index 2를 우선 사용
                  * ==================================================
                  */
 
@@ -501,6 +553,23 @@ public class TransactionImportService {
                         getString(
                                 row.getCell(2)
                         );
+
+
+                /*
+                 * index 2가 비어있는 경우
+                 * index 1(적요)을 fallback으로 사용
+                 */
+
+                if (
+                        merchant == null
+                                || merchant.isBlank()
+                ) {
+
+                    merchant =
+                            getString(
+                                    row.getCell(1)
+                            );
+                }
 
 
                 if (
@@ -519,41 +588,44 @@ public class TransactionImportService {
 
                 /*
                  * ==================================================
-                 * 입금 / 지출 금액 확인
+                 * 출금 / 입금 금액
                  *
-                 * index 3 = 입금
-                 * index 4 = 지출
+                 * 중요
+                 *
+                 * index 5 = 출금액
+                 * index 6 = 입금액
+                 *
                  * ==================================================
                  */
 
-                Cell incomeCell =
-                        row.getCell(3);
-
                 Cell expenseCell =
-                        row.getCell(4);
+                        row.getCell(5);
+
+                Cell incomeCell =
+                        row.getCell(6);
 
 
                 /*
                  * ==================================================
-                 * SUM 등의 수식 행 제외
+                 * 합계 행 제외
                  *
-                 * 입금 또는 지출 컬럼 중 하나라도
-                 * 수식이면 합계 행으로 판단
+                 * 출금액 또는 입금액에 SUM 등의
+                 * 수식이 들어있는 경우 제외
                  * ==================================================
                  */
 
                 if (
-                        (incomeCell != null
-                                && incomeCell.getCellType()
+                        (expenseCell != null
+                                && expenseCell.getCellType()
                                 == CellType.FORMULA)
                                 ||
-                                (expenseCell != null
-                                        && expenseCell.getCellType()
+                                (incomeCell != null
+                                        && incomeCell.getCellType()
                                         == CellType.FORMULA)
                 ) {
 
                     log.debug(
-                            "합계 행 제외 - row={}",
+                            "합계/수식 행 제외 - row={}",
                             i
                     );
 
@@ -563,19 +635,7 @@ public class TransactionImportService {
 
                 /*
                  * ==================================================
-                 * 입금 금액
-                 * ==================================================
-                 */
-
-                Integer incomeAmount =
-                        getInteger(
-                                incomeCell
-                        );
-
-
-                /*
-                 * ==================================================
-                 * 지출 금액
+                 * 출금액
                  * ==================================================
                  */
 
@@ -587,10 +647,55 @@ public class TransactionImportService {
 
                 /*
                  * ==================================================
-                 * 거래 유형 판단
+                 * 입금액
+                 * ==================================================
+                 */
+
+                Integer incomeAmount =
+                        getInteger(
+                                incomeCell
+                        );
+
+
+                log.debug(
+                        "Excel row={} - merchant={}, expense={}, income={}",
+                        i,
+                        merchant,
+                        expenseAmount,
+                        incomeAmount
+                );
+
+
+                /*
+                 * ==================================================
+                 * 출금과 입금이 동시에 존재하는 경우
                  *
-                 * 4열 != 0 → INCOME
-                 * 5열 != 0 → EXPENSE
+                 * 일반적인 거래에서는 발생하면 안 됨
+                 * ==================================================
+                 */
+
+                if (
+                        expenseAmount != null
+                                && expenseAmount != 0
+                                && incomeAmount != null
+                                && incomeAmount != 0
+                ) {
+
+                    log.warn(
+                            "출금과 입금 금액이 동시에 존재하는 비정상 거래 제외 - row={}, merchant={}, expense={}, income={}",
+                            i,
+                            merchant,
+                            expenseAmount,
+                            incomeAmount
+                    );
+
+                    continue;
+                }
+
+
+                /*
+                 * ==================================================
+                 * 거래 유형 및 금액 결정
                  * ==================================================
                  */
 
@@ -601,62 +706,13 @@ public class TransactionImportService {
 
                 /*
                  * ==================================================
-                 * 둘 다 값이 있는 경우
-                 *
-                 * 일반적인 거래 데이터에서는 발생하면 안 됨
-                 * ==================================================
-                 */
-
-                if (
-                        incomeAmount != null
-                                && incomeAmount != 0
-                                && expenseAmount != null
-                                && expenseAmount != 0
-                ) {
-
-                    log.warn(
-                            "입금과 지출 금액이 동시에 존재하는 비정상 거래 제외 - row={}, merchant={}, income={}, expense={}",
-                            i,
-                            merchant,
-                            incomeAmount,
-                            expenseAmount
-                    );
-
-                    continue;
-                }
-
-
-                /*
-                 * ==================================================
-                 * INCOME
-                 *
-                 * 4열(index 3)이 0이 아닌 경우
-                 * ==================================================
-                 */
-
-                if (
-                        incomeAmount != null
-                                && incomeAmount != 0
-                ) {
-
-                    transactionType =
-                            TransactionType.INCOME;
-
-                    amount =
-                            incomeAmount;
-
-                }
-
-
-                /*
-                 * ==================================================
                  * EXPENSE
                  *
-                 * 5열(index 4)이 0이 아닌 경우
+                 * index 5 = 출금액
                  * ==================================================
                  */
 
-                else if (
+                if (
                         expenseAmount != null
                                 && expenseAmount != 0
                 ) {
@@ -666,7 +722,27 @@ public class TransactionImportService {
 
                     amount =
                             expenseAmount;
+                }
 
+
+                /*
+                 * ==================================================
+                 * INCOME
+                 *
+                 * index 6 = 입금액
+                 * ==================================================
+                 */
+
+                else if (
+                        incomeAmount != null
+                                && incomeAmount != 0
+                ) {
+
+                    transactionType =
+                            TransactionType.INCOME;
+
+                    amount =
+                            incomeAmount;
                 }
 
 
@@ -674,15 +750,15 @@ public class TransactionImportService {
                  * ==================================================
                  * 금액이 없는 행
                  *
-                 * 입금 = 0
-                 * 지출 = 0
+                 * 출금 = 0 / null
+                 * 입금 = 0 / null
                  * ==================================================
                  */
 
                 else {
 
                     log.debug(
-                            "입금/지출 금액이 없는 행 제외 - row={}, merchant={}",
+                            "입금/출금 금액이 없는 행 제외 - row={}, merchant={}",
                             i,
                             merchant
                     );
@@ -715,8 +791,13 @@ public class TransactionImportService {
                  *      ↓
                  * Keyword 검색
                  *      ↓
-                 * 찾음 → KEYWORD
-                 * 못 찾음 → UNCONFIRMED
+                 * 찾음
+                 *      ↓
+                 * KEYWORD
+                 *
+                 * 못 찾음
+                 *      ↓
+                 * UNCONFIRMED
                  *
                  * INCOME
                  *      ↓
@@ -736,6 +817,10 @@ public class TransactionImportService {
                             );
 
 
+                    /*
+                     * Keyword 발견
+                     */
+
                     if (category != null) {
 
                         transaction.setCategory(
@@ -754,7 +839,14 @@ public class TransactionImportService {
                                 category.getName()
                         );
 
-                    } else {
+                    }
+
+
+                    /*
+                     * Keyword 없음
+                     */
+
+                    else {
 
                         transaction.setClassificationType(
                                 ClassificationType.UNCONFIRMED
@@ -767,12 +859,18 @@ public class TransactionImportService {
                         );
                     }
 
-                } else {
+                }
 
-                    /*
-                     * INCOME은 소비 카테고리 분류 대상이 아니므로
-                     * UNCLASSIFIED 처리
-                     */
+
+                /*
+                 * ==================================================
+                 * INCOME
+                 *
+                 * 수입은 소비 카테고리 분류 대상이 아님
+                 * ==================================================
+                 */
+
+                else {
 
                     transaction.setClassificationType(
                             ClassificationType.UNCLASSIFIED
@@ -782,19 +880,26 @@ public class TransactionImportService {
 
                 /*
                  * ==================================================
-                 * 로그
+                 * 최종 거래 로그
                  * ==================================================
                  */
 
                 log.info(
-                        "[TRANSACTION] row={}, merchant={}, amount={}, type={}, classification={}",
+                        "[TRANSACTION] row={}, date={}, merchant={}, amount={}, type={}, classification={}",
                         i,
+                        date,
                         merchant,
                         amount,
                         transactionType,
                         transaction.getClassificationType()
                 );
 
+
+                /*
+                 * ==================================================
+                 * 거래 목록 추가
+                 * ==================================================
+                 */
 
                 transactions.add(
                         transaction
@@ -809,12 +914,18 @@ public class TransactionImportService {
 
     /**
      * ============================================================
-     * 날짜
+     * 날짜 파싱
      * ============================================================
      */
     private LocalDateTime getDate(
             Cell cell
     ) {
+
+        /*
+         * ========================================================
+         * 빈 셀
+         * ========================================================
+         */
 
         if (
                 cell == null
@@ -827,7 +938,13 @@ public class TransactionImportService {
 
 
         /*
+         * ========================================================
          * 문자열 날짜
+         *
+         * 예:
+         *
+         * 2026.08.25 14:36:41
+         * ========================================================
          */
 
         if (
@@ -846,17 +963,30 @@ public class TransactionImportService {
             }
 
 
-            return LocalDateTime.parse(
-                    value,
-                    DateTimeFormatter.ofPattern(
-                            "yyyy.MM.dd HH:mm:ss"
-                    )
-            );
+            try {
+
+                return LocalDateTime.parse(
+                        value,
+                        DateTimeFormatter.ofPattern(
+                                "yyyy.MM.dd HH:mm:ss"
+                        )
+                );
+
+            } catch (Exception e) {
+
+                throw new IllegalArgumentException(
+                        "날짜 형식이 올바르지 않습니다: "
+                                + value,
+                        e
+                );
+            }
         }
 
 
         /*
+         * ========================================================
          * Excel 날짜
+         * ========================================================
          */
 
         if (
@@ -882,10 +1012,96 @@ public class TransactionImportService {
 
     /**
      * ============================================================
-     * 금액
+     * 금액 파싱
+     *
+     * 예:
+     *
+     * 12,150
+     * 200,000,000
+     * 0
      * ============================================================
      */
     private Integer getInteger(
+            Cell cell
+    ) {
+
+        /*
+         * ========================================================
+         * 빈 셀
+         * ========================================================
+         */
+
+        if (cell == null) {
+
+            return null;
+        }
+
+
+        DataFormatter formatter =
+                new DataFormatter();
+
+
+        String value =
+                formatter
+                        .formatCellValue(cell)
+                        .trim();
+
+
+        /*
+         * ========================================================
+         * 빈 문자열
+         * ========================================================
+         */
+
+        if (value.isEmpty()) {
+
+            return null;
+        }
+
+
+        try {
+
+            /*
+             * 콤마 제거
+             *
+             * 200,000,000
+             *      ↓
+             * 200000000
+             */
+
+            value =
+                    value.replace(
+                            ",",
+                            ""
+                    );
+
+
+            /*
+             * 숫자로 변환
+             */
+
+            return (int)
+                    Double.parseDouble(
+                            value
+                    );
+
+        } catch (NumberFormatException e) {
+
+            throw new IllegalArgumentException(
+                    "금액 형식이 올바르지 않습니다: "
+                            + value,
+                    e
+            );
+        }
+    }
+
+
+    /**
+     * ============================================================
+     * 문자열 파싱
+     * ============================================================
+     */
+    private String getString(
             Cell cell
     ) {
 
@@ -911,49 +1127,7 @@ public class TransactionImportService {
         }
 
 
-        try {
-
-            value =
-                    value.replace(
-                            ",",
-                            ""
-                    );
-
-
-            return (int)
-                    Double.parseDouble(
-                            value
-                    );
-
-        } catch (NumberFormatException e) {
-
-            throw new IllegalArgumentException(
-                    "금액 형식이 올바르지 않습니다: "
-                            + value,
-                    e
-            );
-        }
-    }
-
-
-    /**
-     * ============================================================
-     * 문자열
-     * ============================================================
-     */
-    private String getString(
-            Cell cell
-    ) {
-
-        if (cell == null) {
-
-            return null;
-        }
-
-
-        return cell
-                .toString()
-                .trim();
+        return value;
     }
 
 
@@ -985,6 +1159,10 @@ public class TransactionImportService {
                     categoryKeyword.getKeyword();
 
 
+            /*
+             * 빈 Keyword 무시
+             */
+
             if (
                     keyword == null
                             || keyword.isBlank()
@@ -994,8 +1172,14 @@ public class TransactionImportService {
             }
 
 
+            /*
+             * 가맹점명에 Keyword 포함 여부
+             */
+
             if (
-                    merchant.contains(keyword)
+                    merchant.contains(
+                            keyword
+                    )
             ) {
 
                 return categoryKeyword
