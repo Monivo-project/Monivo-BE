@@ -58,22 +58,51 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
 
     // 거래 검색
     @Query("""
-        SELECT t
-        FROM Transaction t
-        WHERE t.member = :member
-          AND t.date >= :startDate
-          AND t.date < :endDate
-          AND (:merchant IS NULL OR :merchant = ''
-               OR LOWER(t.merchant) LIKE LOWER(CONCAT('%', :merchant, '%')))
-          AND (:categoryId IS NULL OR t.category.id = :categoryId)
-        ORDER BY t.date DESC
-    """)
-    List<Transaction> searchTransactions(
+    SELECT t
+    FROM Transaction t
+    WHERE t.member = :member
+      AND t.date >= :startDate
+      AND t.date < :endDate
+
+      AND (
+          :merchant IS NULL
+          OR :merchant = ''
+          OR LOWER(t.merchant) LIKE LOWER(CONCAT('%', :merchant, '%'))
+      )
+
+      AND (
+          :categoryId IS NULL
+          OR t.category.id = :categoryId
+      )
+
+      AND (
+          :classification IS NULL
+          OR (
+              :classification = 'CLASSIFIED'
+              AND t.classificationType NOT IN (
+                  com.example.monivobe.domain.transaction.enums.ClassificationType.UNCLASSIFIED,
+                  com.example.monivobe.domain.transaction.enums.ClassificationType.UNCONFIRMED
+              )
+          )
+          OR (
+              :classification = 'UNCLASSIFIED'
+              AND t.classificationType IN (
+                  com.example.monivobe.domain.transaction.enums.ClassificationType.UNCLASSIFIED,
+                  com.example.monivobe.domain.transaction.enums.ClassificationType.UNCONFIRMED
+              )
+          )
+      )
+
+    ORDER BY t.date DESC
+""")
+    Page<Transaction> searchTransactions(
             @Param("member") Member member,
             @Param("startDate") LocalDateTime startDate,
             @Param("endDate") LocalDateTime endDate,
             @Param("merchant") String merchant,
-            @Param("categoryId") Long categoryId
+            @Param("categoryId") Long categoryId,
+            @Param("classification") String classification,
+            Pageable pageable
     );
 
     // 이상 지출 개수
@@ -139,7 +168,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
     WHERE t.member = :member
       AND t.date >= :startDate
       AND t.date < :endDate
-      AND t.category IS NULL
+      AND t.classificationType = com.example.monivobe.domain.transaction.enums.ClassificationType.UNCLASSIFIED
+      AND t.transactionType = com.example.monivobe.domain.transaction.enums.TransactionType.EXPENSE
 """)
     Integer countUnclassifiedTransactions(
             @Param("member") Member member,

@@ -5,6 +5,7 @@ import com.example.monivobe.domain.consumption.dto.ConsumptionResDTO;
 import com.example.monivobe.domain.consumption.exception.code.ConsumptionSuccessCode;
 import com.example.monivobe.domain.consumption.service.ConsumptionService;
 import com.example.monivobe.domain.transaction.entity.Transaction;
+import com.example.monivobe.domain.transaction.enums.ClassificationType;
 import com.example.monivobe.global.apiPayload.ApiResponse;
 import com.example.monivobe.global.apiPayload.code.BaseSuccessCode;
 import com.example.monivobe.global.security.entity.AuthMember;
@@ -47,16 +48,57 @@ public class ConsumptionController {
 
     // 거래 검색
     // GET /api/consumption/search?year=2026&month=8&merchant=스타벅스&categoryId=5
+    /**
+     * 거래 검색
+     *
+     * GET /api/consumption/search
+     *
+     * 예시:
+     * /api/consumption/search?year=2026&month=8
+     * /api/consumption/search?year=2026&month=8&merchant=스타벅스
+     * /api/consumption/search?year=2026&month=8&categoryId=5
+     * /api/consumption/search?year=2026&month=8&classificationType=LLM
+     * /api/consumption/search?year=2026&month=8&merchant=스타벅스&page=0&size=10
+     */
     @GetMapping("/search")
     public ApiResponse<ConsumptionResDTO.GetConsumption> searchConsumption(
             @RequestParam Integer year,
             @RequestParam Integer month,
-            @RequestParam(required = false) String merchant,
-            @RequestParam(required = false) Long categoryId,
+
+            @RequestParam(required = false)
+            String merchant,
+
+            @RequestParam(required = false)
+            Long categoryId,
+
+            @RequestParam(required = false)
+            String classification,
+
+            @RequestParam(defaultValue = "0")
+            int page,
+
+            @RequestParam(defaultValue = "10")
+            int size,
+
             @AuthenticationPrincipal AuthMember authMember
     ) {
-        BaseSuccessCode code = ConsumptionSuccessCode.CONSUMPTION_GET_SUCCESS;
-        return ApiResponse.onSuccess(code, consumptionService.searchConsumption(year, month, merchant, categoryId, authMember.getMember()));
+
+        BaseSuccessCode code =
+                ConsumptionSuccessCode.CONSUMPTION_GET_SUCCESS;
+
+        return ApiResponse.onSuccess(
+                code,
+                consumptionService.searchConsumption(
+                        year,
+                        month,
+                        merchant,
+                        categoryId,
+                        classification,
+                        page,
+                        size,
+                        authMember.getMember()
+                )
+        );
     }
 
     // 거래 상세 조회
