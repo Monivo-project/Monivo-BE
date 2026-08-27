@@ -213,12 +213,13 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
      * 특정 기간의 총 지출
      */
     @Query("""
-        SELECT COALESCE(SUM(t.amount), 0)
-        FROM Transaction t
-        WHERE t.member = :member
-          AND t.date >= :startDate
-          AND t.date < :endDate
-    """)
+    SELECT COALESCE(SUM(t.amount), 0)
+    FROM Transaction t
+    WHERE t.member = :member
+      AND t.date >= :startDate
+      AND t.date < :endDate
+      AND t.transactionType = com.example.monivobe.domain.transaction.enums.TransactionType.EXPENSE
+""")
     Integer getTotalAmount(
             @Param("member") Member member,
             @Param("startDate") LocalDateTime startDate,

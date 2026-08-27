@@ -36,9 +36,8 @@ public class ExpectedBudgetService {
     /**
      * 선택한 월의 예상 지출 조회
      *
-     * 데이터가 이미 있으면 DB 조회
-     *
-     * 데이터가 없으면 AI 분석 후 생성
+     * 이미 생성된 예상 지출이 있으면 DB에서 조회
+     * 없으면 AI 분석 후 생성
      */
     @Transactional
     public HomeResDTO.ExpectedBudget getExpectedBudget(
@@ -69,7 +68,7 @@ public class ExpectedBudgetService {
         }
 
         /*
-         * 없으면 생성
+         * 존재하지 않으면 생성
          */
         return createExpectedBudget(
                 member,
@@ -81,10 +80,8 @@ public class ExpectedBudgetService {
     /**
      * 파일 업로드 후 예상 지출 생성
      *
-     * 이미 존재하는 월이라면 다시 AI를 호출하지 않는다.
-     *
-     * 따라서 Excel을 여러 번 업로드해도
-     * 동일한 월의 예상 지출이 계속 INSERT되지 않는다.
+     * 동일한 월의 예상 지출이 이미 존재한다면
+     * 다시 AI 분석을 수행하지 않는다.
      */
     @Transactional(
             propagation = Propagation.REQUIRES_NEW
@@ -94,9 +91,6 @@ public class ExpectedBudgetService {
             YearMonth targetMonth
     ) {
 
-        /*
-         * 이미 존재하는 예상 지출인지 확인
-         */
         Optional<ExpectedBudget> existing =
                 expectedBudgetRepository
                         .findByMemberAndTargetYearAndTargetMonth(
@@ -105,6 +99,9 @@ public class ExpectedBudgetService {
                                 targetMonth.getMonthValue()
                         );
 
+        /*
+         * 이미 존재하는 경우 생성하지 않음
+         */
         if (existing.isPresent()) {
 
             System.out.println(
@@ -128,6 +125,13 @@ public class ExpectedBudgetService {
 
     /**
      * 선택한 월의 예상 지출 생성
+     *
+     * AI 분석 기준:
+     *
+     * - 이전 6개월
+     * - 선택한 월
+     *
+     * 총 7개월의 EXPENSE 거래만 사용
      */
     @Transactional
     public HomeResDTO.ExpectedBudget createExpectedBudget(
@@ -139,8 +143,14 @@ public class ExpectedBudgetService {
          * ====================================================
          * AI 분석 기간
          *
-         * 선택한 월 기준
-         * 이전 6개월 + 선택한 월
+         * 예:
+         * targetMonth = 2026-08
+         *
+         * analysisStartMonth = 2026-02
+         *
+         * → 2026-02 ~ 2026-08
+         *
+         * 총 7개월
          * ====================================================
          */
 
@@ -176,20 +186,48 @@ public class ExpectedBudgetService {
 
         /*
          * ====================================================
-         * 월별 지출
+         * EXPENSE 거래만 필터링
          *
-         * EXPENSE만 계산
+         * INCOME은 예상 지출 계산에서 완전히 제외
          * ====================================================
          */
 
-        Map<YearMonth, Integer> monthlyAmount =
+        List<Transaction> expenseTransactions =
                 transactions.stream()
-
                         .filter(transaction ->
                                 transaction.getTransactionType()
                                         == TransactionType.EXPENSE
                         )
+                        .toList();
 
+
+        /*
+         * ====================================================
+         * 디버깅
+         * ====================================================
+         */
+
+        System.out.println(
+                "[EXPECTED BUDGET] 전체 거래 수 = "
+                        + transactions.size()
+        );
+
+        System.out.println(
+                "[EXPECTED BUDGET] EXPENSE 거래 수 = "
+                        + expenseTransactions.size()
+        );
+
+
+        /*
+         * ====================================================
+         * 월별 지출
+         *
+         * EXPENSE만 월별 합산
+         * ====================================================
+         */
+
+        Map<YearMonth, Integer> monthlyAmount =
+                expenseTransactions.stream()
                         .collect(
                                 Collectors.groupingBy(
                                         transaction ->
@@ -208,19 +246,51 @@ public class ExpectedBudgetService {
 
         /*
          * ====================================================
+         * ⭐ 선택한 월의 현재 지출
+         *
+         * targetMonth에 해당하는 EXPENSE 거래만 합산
+         *
+         * 예:
+         *
+         * targetMonth = 2026-08
+         *
+         * 8월 EXPENSE:
+         *
+         * 50,000
+         * 30,000
+         * 70,000
+         *
+         * currentAmount = 150,000
+         *
+         * INCOME은 절대 포함하지 않음
+         * ====================================================
+         */
+
+        int currentAmount =
+                expenseTransactions.stream()
+                        .filter(transaction ->
+                                YearMonth.from(
+                                        transaction.getDate()
+                                ).equals(targetMonth)
+                        )
+                        .mapToInt(
+                                Transaction::getAmount
+                        )
+                        .sum();
+
+
+        /*
+         * ====================================================
          * 카테고리별 지출
          *
-         * EXPENSE만 계산
+         * EXPENSE만 사용
+         *
+         * 카테고리가 없는 거래는 제외
          * ====================================================
          */
 
         Map<String, Integer> categoryAmount =
-                transactions.stream()
-
-                        .filter(transaction ->
-                                transaction.getTransactionType()
-                                        == TransactionType.EXPENSE
-                        )
+                expenseTransactions.stream()
 
                         .filter(transaction ->
                                 transaction.getCategory() != null
@@ -242,20 +312,29 @@ public class ExpectedBudgetService {
 
         /*
          * ====================================================
-         * 선택한 월의 현재 지출
+         * 디버깅
          * ====================================================
          */
 
-        int currentAmount =
-                monthlyAmount.getOrDefault(
-                        targetMonth,
-                        0
-                );
+        System.out.println(
+                "[EXPECTED BUDGET] targetMonth = "
+                        + targetMonth
+        );
+
+        System.out.println(
+                "[EXPECTED BUDGET] currentAmount = "
+                        + currentAmount
+        );
+
+        System.out.println(
+                "[EXPECTED BUDGET] monthlyAmount = "
+                        + monthlyAmount
+        );
 
 
         /*
          * ====================================================
-         * 현재까지 경과한 날짜
+         * 현재 날짜 기준 경과 일수
          * ====================================================
          */
 
@@ -272,6 +351,9 @@ public class ExpectedBudgetService {
 
         } else {
 
+            /*
+             * 과거 월이면 해당 월의 전체 날짜 사용
+             */
             currentDays =
                     targetMonth.lengthOfMonth();
         }
@@ -298,6 +380,8 @@ public class ExpectedBudgetService {
 
                         /*
                          * 최근 6개월 + 선택한 월
+                         *
+                         * EXPENSE만 전달
                          */
                         .monthlySpending(
                                 monthlyAmount.entrySet()
@@ -319,6 +403,8 @@ public class ExpectedBudgetService {
 
                         /*
                          * 카테고리별 지출
+                         *
+                         * EXPENSE만 전달
                          */
                         .categorySpending(
                                 categoryAmount.entrySet()
@@ -339,6 +425,8 @@ public class ExpectedBudgetService {
 
                         /*
                          * 선택한 월 현재 지출
+                         *
+                         * EXPENSE만 포함
                          */
                         .currentMonthAmount(
                                 currentAmount
@@ -414,6 +502,9 @@ public class ExpectedBudgetService {
                                 result.recommendedBudget()
                         )
 
+                        /*
+                         * ⭐ EXPENSE만 합산된 현재 지출
+                         */
                         .currentAmount(
                                 currentAmount
                         )
@@ -463,6 +554,13 @@ public class ExpectedBudgetService {
         );
     }
 
+
+    /**
+     * 예상 지출 새로고침
+     *
+     * 기존 데이터를 삭제하고
+     * 현재 거래내역 기준으로 다시 AI 분석
+     */
     @Transactional
     public HomeResDTO.ExpectedBudget refreshExpectedBudget(
             Member member,
@@ -477,6 +575,9 @@ public class ExpectedBudgetService {
                                 targetMonth.getMonthValue()
                         );
 
+        /*
+         * 기존 예상 지출 삭제
+         */
         if (existingBudget.isPresent()) {
 
             expectedBudgetRepository.delete(
@@ -486,6 +587,12 @@ public class ExpectedBudgetService {
             expectedBudgetRepository.flush();
         }
 
+
+        /*
+         * 새롭게 예상 지출 생성
+         *
+         * 여기에서도 EXPENSE만 계산됨
+         */
         return createExpectedBudget(
                 member,
                 targetMonth
