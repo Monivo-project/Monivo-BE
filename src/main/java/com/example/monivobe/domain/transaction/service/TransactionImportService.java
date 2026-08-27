@@ -599,10 +599,10 @@ public class TransactionImportService {
                  */
 
                 Cell expenseCell =
-                        row.getCell(5);
+                        row.getCell(4);
 
                 Cell incomeCell =
-                        row.getCell(6);
+                        row.getCell(5);
 
 
                 /*
