@@ -299,4 +299,14 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             Integer amount,
             LocalDateTime date
     );
+
+    List<Transaction> findByMemberAndNormalizedMerchant(
+            Member member,
+            String normalizedMerchant
+    );
+
+    List<Transaction> findByMemberAndMerchant(
+            Member member,
+            String merchant
+    );
 }
