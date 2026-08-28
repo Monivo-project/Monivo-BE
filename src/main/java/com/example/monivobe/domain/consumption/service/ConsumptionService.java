@@ -473,7 +473,10 @@ public class ConsumptionService {
             Member member
     ) {
 
+        // ============================================================
         // 1. 거래 조회
+        // ============================================================
+
         Transaction transaction = transactionRepository
                 .findById(transactionId)
                 .orElseThrow(() ->
@@ -482,14 +485,20 @@ public class ConsumptionService {
                         )
                 );
 
+        // ============================================================
         // 2. 본인 거래인지 확인
+        // ============================================================
+
         if (!transaction.getMember().getId().equals(member.getId())) {
             throw new IllegalArgumentException(
                     "본인의 거래만 수정할 수 있습니다."
             );
         }
 
+        // ============================================================
         // 3. 카테고리 조회
+        // ============================================================
+
         Category category = categoryRepository
                 .findById(categoryId)
                 .orElseThrow(() ->
@@ -498,34 +507,100 @@ public class ConsumptionService {
                         )
                 );
 
-        // 4. 거래의 카테고리 변경
-        transaction.setCategory(category);
+        // ============================================================
+        // 4. 현재 거래의 가맹점 정보 가져오기
+        // ============================================================
 
-        // 5. 사용자가 직접 수정했으므로 USER로 변경
-        transaction.setClassificationType(
-                ClassificationType.USER
-        );
+        String normalizedMerchant =
+                transaction.getNormalizedMerchant();
 
-        // 6. 사용자 키워드 생성/수정
-        String keyword = transaction.getNormalizedMerchant();
+        String merchant =
+                transaction.getMerchant();
+
+        // ============================================================
+        // 5. 같은 가맹점의 거래 조회
+        //
+        // normalizedMerchant가 있으면
+        // normalizedMerchant 기준으로 조회
+        //
+        // 없으면 merchant 기준으로 조회
+        // ============================================================
+
+        List<Transaction> sameMerchantTransactions;
+
+        if (normalizedMerchant != null
+                && !normalizedMerchant.isBlank()) {
+
+            sameMerchantTransactions =
+                    transactionRepository
+                            .findByMemberAndNormalizedMerchant(
+                                    member,
+                                    normalizedMerchant
+                            );
+
+        } else if (merchant != null
+                && !merchant.isBlank()) {
+
+            sameMerchantTransactions =
+                    transactionRepository
+                            .findByMemberAndMerchant(
+                                    member,
+                                    merchant
+                            );
+
+        } else {
+
+            // 가맹점 정보가 없으면 현재 거래만 수정
+            sameMerchantTransactions =
+                    List.of(transaction);
+        }
+
+        // ============================================================
+        // 6. 같은 가맹점의 모든 거래 카테고리 변경
+        // ============================================================
+
+        for (Transaction sameTransaction :
+                sameMerchantTransactions) {
+
+            sameTransaction.setCategory(category);
+
+            // 사용자가 직접 수정했으므로 USER
+            sameTransaction.setClassificationType(
+                    ClassificationType.USER
+            );
+        }
+
+        // ============================================================
+        // 7. 사용자 키워드 생성 / 수정
+        // ============================================================
+
+        String keyword = normalizedMerchant;
 
         // normalizedMerchant가 없는 경우 merchant 사용
         if (keyword == null || keyword.isBlank()) {
-            keyword = transaction.getMerchant();
+            keyword = merchant;
         }
 
-        // keyword가 존재하는 경우에만 저장
         if (keyword != null && !keyword.isBlank()) {
 
-            // 7. 기존 사용자 키워드 검색
+            // ========================================================
+            // 8. 기존 사용자 키워드 검색
+            // ========================================================
+
             MemberCategoryKeyword memberCategoryKeyword =
                     memberCategoryKeywordRepository
-                            .findByMemberAndKeyword(member, keyword)
+                            .findByMemberAndKeyword(
+                                    member,
+                                    keyword
+                            )
                             .orElse(null);
+
+            // ========================================================
+            // 9. 기존 키워드가 없으면 생성
+            // ========================================================
 
             if (memberCategoryKeyword == null) {
 
-                // 8. 기존 키워드가 없으면 새로 생성
                 memberCategoryKeyword =
                         new MemberCategoryKeyword(
                                 member,
@@ -539,12 +614,20 @@ public class ConsumptionService {
 
             } else {
 
-                // 9. 기존 키워드가 있으면 카테고리 변경
-                memberCategoryKeyword.updateCategory(category);
+                // ====================================================
+                // 10. 기존 키워드가 있으면 카테고리 변경
+                // ====================================================
+
+                memberCategoryKeyword.updateCategory(
+                        category
+                );
             }
         }
 
-        // 10. Transaction 반환
+        // ============================================================
+        // 11. 수정된 거래 반환
+        // ============================================================
+
         return transaction;
     }
 }
