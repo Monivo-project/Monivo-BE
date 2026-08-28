@@ -286,10 +286,13 @@ public class HomeService {
                 new ArrayList<>();
 
         /*
-         * 현재 달을 제외하고
-         * 이전 6개월
+         * 현재 달을 포함한 최근 6개월
+         *
+         * 현재가 2026년 8월이라면
+         *
+         * 3월 → 4월 → 5월 → 6월 → 7월 → 8월
          */
-        for (int i = 6; i >= 1; i--) {
+        for (int i = 5; i >= 0; i--) {
 
             YearMonth targetMonth =
                     currentMonth.minusMonths(i);
